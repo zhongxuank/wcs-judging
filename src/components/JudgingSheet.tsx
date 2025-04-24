@@ -52,6 +52,15 @@ interface TieInfo {
     affectedPositions: string[];
 }
 
+// Helper function to create a new score object with updated rank/tie info
+const updateScoreDetails = (score: Score, rank?: number, hasTie?: boolean, status?: 'YES' | 'ALT' | 'NO', tiedWith?: string[]): Score => ({
+    ...score,
+    rank: rank,
+    hasTie: hasTie || false,
+    status: status,
+    tiedWith: tiedWith || [],
+});
+
 const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmit }) => {
     const [state, setState] = useState<JudgingState>({
         scores: [],
@@ -80,34 +89,35 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
             status: undefined,
             tiedWith: []
         }));
-        setState(prev => ({ ...prev, scores: initialScores }));
+        setState(prev => ({ ...prev, scores: initialScores, sortedScores: null })); // Reset sortedScores on role change
     }, [competition, state.currentRole]);
 
-    const calculateRanksAndTies = useCallback((scores: Score[]): Score[] => {
-        // Reset tie status before recalculating
-        scores.forEach(score => {
+    const calculateRanksAndTies = useCallback((scoresToProcess: Score[]): Score[] => {
+        // Create a deep copy to avoid mutating the original state scores directly
+        let workingScores = JSON.parse(JSON.stringify(scoresToProcess)) as Score[];
+        
+        // Reset tie status before recalculating on the copy
+        workingScores.forEach(score => {
             score.hasTie = false;
             score.tiedWith = [];
         });
-        
-        // Sort scores from highest to lowest
-        const sortedScores = [...scores].sort((a, b) => {
+
+        // Sort the copied scores from highest to lowest
+        workingScores.sort((a, b) => {
             const scoreA = a.rawScore ?? -Infinity;
             const scoreB = b.rawScore ?? -Infinity;
             return scoreB - scoreA;
         });
 
         let currentRank = 1;
-        let lastScore = sortedScores[0]?.rawScore ?? null;
-        let tiedGroup: Score[] = [];
+        let lastScore = workingScores[0]?.rawScore ?? null;
 
-        // First pass: assign ranks
-        sortedScores.forEach((score, index) => {
+        // First pass: assign ranks on the copy
+        workingScores.forEach((score, index) => {
             if (score.rawScore === null) {
                 score.rank = undefined;
                 return;
             }
-
             if (score.rawScore !== lastScore) {
                 currentRank = index + 1;
                 lastScore = score.rawScore;
@@ -115,44 +125,35 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
             score.rank = currentRank;
         });
 
-        // Second pass: identify ties
-        sortedScores.forEach((score, index) => {
-            if (score.rawScore === null) return;
-
-            if (tiedGroup.length === 0) {
-                tiedGroup = [score];
-            } else if (tiedGroup[0].rawScore === score.rawScore) {
-                tiedGroup.push(score);
-            } else {
-                if (tiedGroup.length > 1) {
-                    tiedGroup.forEach(tiedScore => {
-                        tiedScore.hasTie = true;
-                        tiedScore.tiedWith = tiedGroup
-                            .filter(s => s.competitorId !== tiedScore.competitorId)
-                            .map(s => s.competitorId);
-                    });
+        // Second pass: identify ties on the copy
+        for (let i = 0; i < workingScores.length; i++) {
+            if (workingScores[i].rawScore === null) continue;
+            
+            let tiedGroupIndices = [i];
+            for (let j = i + 1; j < workingScores.length; j++) {
+                if (workingScores[j].rawScore === workingScores[i].rawScore) {
+                    tiedGroupIndices.push(j);
+                } else {
+                    break; // Scores are sorted, so no more ties for this score
                 }
-                tiedGroup = [score];
             }
-        });
 
-        // Handle last group
-        if (tiedGroup.length > 1) {
-            tiedGroup.forEach(tiedScore => {
-                tiedScore.hasTie = true;
-                tiedScore.tiedWith = tiedGroup
-                    .filter(s => s.competitorId !== tiedScore.competitorId)
-                    .map(s => s.competitorId);
-            });
+            if (tiedGroupIndices.length > 1) {
+                const tiedCompetitorIds = tiedGroupIndices.map(idx => workingScores[idx].competitorId);
+                tiedGroupIndices.forEach(idx => {
+                    workingScores[idx].hasTie = true;
+                    workingScores[idx].tiedWith = tiedCompetitorIds.filter(id => id !== workingScores[idx].competitorId);
+                });
+                i += tiedGroupIndices.length - 1; // Skip the rest of the tied group
+            }
         }
 
-        // Third pass: update status based on rank
-        sortedScores.forEach(score => {
+        // Third pass: update status based on rank on the copy
+        workingScores.forEach(score => {
             if (score.rank === undefined) {
                 score.status = undefined;
                 return;
             }
-
             if (score.rank <= competition.requiredYesCount) {
                 score.status = 'YES';
             } else if (score.rank <= (competition.requiredYesCount + competition.alternateCount)) {
@@ -162,14 +163,40 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
             }
         });
 
-        return sortedScores;
+        // Return the processed copy
+        return workingScores;
+
     }, [competition.requiredYesCount, competition.alternateCount]);
 
-    const debouncedCalculateRanks = useCallback((scores: Score[]) => {
+    const debouncedCalculateRanks = useCallback((latestScores: Score[]) => {
         setTimeout(() => {
-            const sortedScores = calculateRanksAndTies(scores);
-            setState(prev => ({ ...prev, sortedScores }));
-        }, 50);
+            const calculatedSortedScores = calculateRanksAndTies(latestScores);
+            
+            // Create a map for quick lookup of calculated details
+            const calculatedDetailsMap = new Map<string, Partial<Score>>();
+            calculatedSortedScores.forEach(s => {
+                calculatedDetailsMap.set(s.competitorId, {
+                    rank: s.rank,
+                    hasTie: s.hasTie,
+                    status: s.status,
+                    tiedWith: s.tiedWith
+                });
+            });
+
+            setState(prev => {
+                // Update the main scores array with the latest calculated details
+                const updatedMainScores = prev.scores.map(score => {
+                    const details = calculatedDetailsMap.get(score.competitorId);
+                    return details ? { ...score, ...details } : score;
+                });
+                
+                return {
+                     ...prev,
+                      scores: updatedMainScores, // Update main scores with new rank/tie info
+                      sortedScores: calculatedSortedScores // Keep the sorted version for potential use (e.g., submission)
+                };
+            });
+        }, 50); // Keep debounce delay
     }, [calculateRanksAndTies]);
 
     const handleRoleChange = (_: React.SyntheticEvent, newRole: CompetitorRole) => {
@@ -288,35 +315,43 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
     }, [state.scores, judge.roles, judge.isChiefJudge]);
 
     const handleTouchStart = (e: React.TouchEvent, competitorId: string, currentScore: number | null) => {
+        // Check if the touch is on the score cell itself or its children
+        const scoreCell = e.currentTarget;
         const touch = e.touches[0];
-        const rect = e.currentTarget.getBoundingClientRect();
         
         setTouchStart({
             x: touch.clientX,
             y: touch.clientY
         });
         
-        // Calculate initial score based on touch position
-        const rowWidth = rect.width;
+        // Calculate initial score based on touch position within the cell
+        const rect = scoreCell.getBoundingClientRect();
+        const cellWidth = rect.width;
         const touchX = touch.clientX - rect.left;
-        const scorePercent = (touchX / rowWidth) * 100;
-        const initialScore = Math.max(0, Math.min(100, Math.round(scorePercent)));
+        const scorePercent = Math.max(0, Math.min(100, (touchX / cellWidth) * 100)); 
+        const initialScore = Math.round(scorePercent);
         
         setTouchScore(currentScore ?? initialScore);
         setIsAdjusting(true);
+        // Prevent default scroll behavior ONLY when starting touch on the score cell
+        e.preventDefault(); 
     };
 
     const handleTouchMove = (e: React.TouchEvent, competitorId: string) => {
         if (!touchStart || touchScore === null) return;
-
-        const touch = e.touches[0];
-        const rect = e.currentTarget.getBoundingClientRect();
         
-        // Calculate score based on horizontal position
-        const rowWidth = rect.width;
+        // Prevent default scroll behavior while adjusting score
+        e.preventDefault(); 
+
+        const scoreCell = e.currentTarget;
+        const touch = e.touches[0];
+        const rect = scoreCell.getBoundingClientRect();
+        
+        // Calculate score based on horizontal position within the cell
+        const cellWidth = rect.width;
         const touchX = touch.clientX - rect.left;
-        const scorePercent = (touchX / rowWidth) * 100;
-        const newScore = Math.max(0, Math.min(100, Math.round(scorePercent)));
+        const scorePercent = Math.max(0, Math.min(100, (touchX / cellWidth) * 100));
+        const newScore = Math.round(scorePercent);
         
         if (newScore !== touchScore) {
             handleScoreChange(competitorId, newScore);
@@ -419,14 +454,9 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                                     key={score.competitorId}
                                     sx={{
                                         backgroundColor: score.hasTie ? 'warning.light' : 'inherit',
-                                        cursor: 'pointer',
-                                        touchAction: 'pan-y', // Allow vertical scroll, capture horizontal
                                         transition: 'background-color 0.2s',
-                                        position: 'relative', // For positioning the score bar
+                                        position: 'relative', 
                                     }}
-                                    onTouchStart={(e) => handleTouchStart(e, score.competitorId, score.rawScore)}
-                                    onTouchMove={(e) => handleTouchMove(e, score.competitorId)}
-                                    onTouchEnd={handleTouchEnd}
                                 >
                                     <TableCell>
                                         <Box>
@@ -440,7 +470,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                                             </Typography>
                                         </Box>
                                     </TableCell>
-                                    <TableCell sx={{ width: '50%', position: 'relative' }}>
+                                    <TableCell sx={{ width: '50%', position: 'relative', cursor: 'pointer', touchAction: 'pan-y' }}>
                                         <Grid container spacing={2} alignItems="center">
                                             <Grid item xs={12}>
                                                 {score.rawScore === null ? (

@@ -7,12 +7,11 @@ export default defineConfig({
   plugins: [react()],
   base: '/wcs-judging/',
   build: {
+    outDir: 'dist',
+    emptyOutDir: true,
     rollupOptions: {
-      output: {
-        // Add timestamp to chunk names to force cache invalidation
-        chunkFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
-        entryFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
-        assetFileNames: `assets/[name]-[hash]-${Date.now()}.[ext]`
+      input: {
+        main: './index.html'
       }
     }
   },

@@ -26,105 +26,144 @@ import {
     IconButton,
     TextField,
 } from '@mui/material';
-import { Competition, Judge, CompetitorRole, JudgeStatus, ResultType } from '../types/competition';
-import { JudgingSheet as JudgingSheetType, CompetitorScore, TieInfo } from '../types/judging';
+import { Competition, Judge, CompetitorRole, JudgeStatus, JudgingSheet as CompetitionJudgingSheet, Score } from '../types/competition';
 import { db } from '../services/db';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 
+type JudgingSheetType = CompetitionJudgingSheet;
+
 interface JudgingSheetProps {
     competition: Competition;
     judge: Judge;
+    currentRole: CompetitorRole;
+    onSubmit: () => void;
 }
 
 interface JudgingState {
-    currentRole: CompetitorRole;
-    scoresByRole: {
-        [role in CompetitorRole]?: CompetitorScore[];
-    };
-    tieBreakers: TieInfo[];
+    scores: Score[];
+    sortedScores: Score[] | null;
     submitted: boolean;
-    sortedScores: CompetitorScore[];
 }
 
-const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
+interface TieInfo {
+    competitorIds: string[];
+    type: 'yes_alt1' | 'between_alts' | 'alt3_no' | 'chief_judge';
+    affectedPositions: string[];
+}
+
+const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, currentRole, onSubmit }) => {
     const [state, setState] = useState<JudgingState>({
-        currentRole: judge.roles[0],
-        scoresByRole: {
-            [judge.roles[0]]: competition.competitors[judge.roles[0]]
-                .sort((a, b) => a.bibNumber - b.bibNumber)
-                .map(c => ({
-                    competitorId: c.id,
-                    rawScore: null,
-                    rank: 0,
-                    tiedWith: [],
-                }))
-        },
-        tieBreakers: [],
-        submitted: false,
-        sortedScores: [],
+        scores: [],
+        sortedScores: null,
+        submitted: false
     });
+
     const [error, setError] = useState<string | null>(null);
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+    const [snackbarOpen, setSnackbarOpen] = useState(false);
+    const [snackbarMessage, setSnackbarMessage] = useState('');
     const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
     const [touchScore, setTouchScore] = useState<number | null>(null);
     const [isAdjusting, setIsAdjusting] = useState(false);
 
-    // Create a debounced version of calculateRanksAndTies
-    const debouncedCalculateRanks = useCallback(() => {
-        const timeoutId = setTimeout(() => {
-            setState(prev => {
-                const currentScores = prev.scoresByRole[prev.currentRole] || [];
-                const [updatedScores, newTieBreakers] = calculateRanksAndTies(currentScores);
-                return {
-                    ...prev,
-                    scoresByRole: {
-                        ...prev.scoresByRole,
-                        [prev.currentRole]: updatedScores
-                    },
-                    tieBreakers: newTieBreakers,
-                };
-            });
-        }, 50); // 50ms debounce delay
-
-        return () => clearTimeout(timeoutId);
-    }, []);
-
     useEffect(() => {
-        // Initialize scores for all roles if chief judge, otherwise just current role
-        const rolesToInitialize = judge.isChiefJudge ? judge.roles : [state.currentRole];
-        
-        const initialScoresByRole: Required<JudgingState['scoresByRole']> = { 
-            ...state.scoresByRole,
-            Leader: state.scoresByRole.Leader || [],
-            Follower: state.scoresByRole.Follower || []
-        };
-        
-        rolesToInitialize.forEach(role => {
-            // Skip if scores already exist for this role
-            if (initialScoresByRole[role].length > 0) return;
-            
-            const competitors = competition.competitors[role]
-                .sort((a, b) => a.bibNumber - b.bibNumber);
-            const initialScores = competitors.map(c => ({
-                competitorId: c.id,
-                rawScore: null,
-                rank: 0,
-                tiedWith: [],
-            }));
-            
-            // Calculate initial ranks
-            const [rankedScores] = calculateRanksAndTies(initialScores);
-            
-            initialScoresByRole[role] = rankedScores;
-        });
-        
-        setState(prev => ({
-            ...prev,
-            scoresByRole: initialScoresByRole,
-            tieBreakers: [],  // Reset tie breakers when switching roles
+        // Initialize scores for current role
+        const competitors = competition.competitors[currentRole] || [];
+        const initialScores: Score[] = competitors.map(competitor => ({
+            bibNumber: competitor.bibNumber.toString(),
+            competitorId: competitor.id,
+            rawScore: null,
+            rank: undefined,
+            hasTie: false,
+            status: undefined,
+            tiedWith: []
         }));
-    }, [state.currentRole, competition.competitors, judge.isChiefJudge, judge.roles]);
+        setState(prev => ({ ...prev, scores: initialScores }));
+    }, [competition, currentRole]);
+
+    const calculateRanksAndTies = useCallback((scores: Score[]): Score[] => {
+        // Sort scores from highest to lowest
+        const sortedScores = [...scores].sort((a, b) => {
+            const scoreA = a.rawScore ?? -Infinity;
+            const scoreB = b.rawScore ?? -Infinity;
+            return scoreB - scoreA;
+        });
+
+        let currentRank = 1;
+        let lastScore = sortedScores[0]?.rawScore ?? null;
+        let tiedGroup: Score[] = [];
+
+        // First pass: assign ranks
+        sortedScores.forEach((score, index) => {
+            if (score.rawScore === null) {
+                score.rank = undefined;
+                return;
+            }
+
+            if (score.rawScore !== lastScore) {
+                currentRank = index + 1;
+                lastScore = score.rawScore;
+            }
+            score.rank = currentRank;
+        });
+
+        // Second pass: identify ties
+        sortedScores.forEach((score, index) => {
+            if (score.rawScore === null) return;
+
+            if (tiedGroup.length === 0) {
+                tiedGroup = [score];
+            } else if (tiedGroup[0].rawScore === score.rawScore) {
+                tiedGroup.push(score);
+            } else {
+                if (tiedGroup.length > 1) {
+                    tiedGroup.forEach(tiedScore => {
+                        tiedScore.hasTie = true;
+                        tiedScore.tiedWith = tiedGroup
+                            .filter(s => s.competitorId !== tiedScore.competitorId)
+                            .map(s => s.competitorId);
+                    });
+                }
+                tiedGroup = [score];
+            }
+        });
+
+        // Handle last group
+        if (tiedGroup.length > 1) {
+            tiedGroup.forEach(tiedScore => {
+                tiedScore.hasTie = true;
+                tiedScore.tiedWith = tiedGroup
+                    .filter(s => s.competitorId !== tiedScore.competitorId)
+                    .map(s => s.competitorId);
+            });
+        }
+
+        // Third pass: update status based on rank
+        sortedScores.forEach(score => {
+            if (score.rank === undefined) {
+                score.status = undefined;
+                return;
+            }
+
+            if (score.rank <= competition.requiredYesCount) {
+                score.status = 'YES';
+            } else if (score.rank <= (competition.requiredYesCount + competition.alternateCount)) {
+                score.status = 'ALT';
+            } else {
+                score.status = 'NO';
+            }
+        });
+
+        return sortedScores;
+    }, [competition.requiredYesCount, competition.alternateCount]);
+
+    const debouncedCalculateRanks = useCallback((scores: Score[]) => {
+        setTimeout(() => {
+            const sortedScores = calculateRanksAndTies(scores);
+            setState(prev => ({ ...prev, sortedScores }));
+        }, 50);
+    }, [calculateRanksAndTies]);
 
     const handleRoleChange = (_: React.SyntheticEvent, newRole: CompetitorRole) => {
         setState(prev => ({
@@ -133,167 +172,29 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
         }));
     };
 
-    const calculateRanksAndTies = (scores: CompetitorScore[]): [CompetitorScore[], TieInfo[]] => {
-        // Filter out unscored competitors for ranking
-        const scoredCompetitors = scores.filter(s => s.rawScore !== null);
-        
-        // Create a sorted copy for rank calculation without modifying original order
-        const sortedForRanking = [...scoredCompetitors].sort((a, b) => (b.rawScore || 0) - (a.rawScore || 0));
-        
-        // First pass: assign ranks
-        let currentRank = 1;
-        let lastScore: number | null = null;
-        
-        const rankedScores = sortedForRanking.map((score, index) => {
-            if (lastScore === null || score.rawScore !== lastScore) {
-                currentRank = index + 1;
-            }
-            lastScore = score.rawScore;
-            
-            return {
-                ...score,
-                rank: currentRank
-            };
-        });
-
-        // Second pass: identify ties
-        const tiedGroups: { [key: number]: string[] } = {};
-        const meaningfulTies: { [competitorId: string]: string[] } = {};
-
-        rankedScores.forEach(score => {
-            if (score.rawScore === null) return;
-            if (!tiedGroups[score.rawScore]) {
-                tiedGroups[score.rawScore] = [];
-            }
-            tiedGroups[score.rawScore].push(score.competitorId);
-        });
-
-        // Find ties and create tie breakers
-        const tieBreakers: TieInfo[] = [];
-        Object.entries(tiedGroups).forEach(([scoreStr, competitorIds]) => {
-            if (competitorIds.length > 1) {
-                const tiedScores = rankedScores.filter(s => competitorIds.includes(s.competitorId));
-                const lowestRank = Math.min(...tiedScores.map(s => s.rank));
-                const highestRank = lowestRank + competitorIds.length - 1;
-
-                // For chief judge, all ties are meaningful
-                // For regular judges, only ties affecting YES/ALT/NO boundaries are meaningful
-                const isMeaningfulTie = judge.isChiefJudge || (
-                    // Check if tie affects YES/ALT or ALT/NO boundaries or is between ALTs
-                    (lowestRank <= competition.requiredYesCount && 
-                     highestRank > competition.requiredYesCount) ||
-                    (lowestRank <= (competition.requiredYesCount + competition.alternateCount) && 
-                     highestRank > (competition.requiredYesCount + competition.alternateCount)) ||
-                    (lowestRank > competition.requiredYesCount && 
-                     highestRank <= (competition.requiredYesCount + competition.alternateCount))
-                );
-
-                if (isMeaningfulTie) {
-                    // Store the meaningful tie information for each competitor in the tie
-                    competitorIds.forEach(id => {
-                        meaningfulTies[id] = competitorIds.filter(cId => cId !== id);
-                    });
-
-                    let tieType: TieInfo['type'];
-                    let affectedPositions: string[];
-
-                    if (judge.isChiefJudge) {
-                        tieType = 'chief_judge';
-                        affectedPositions = [`#${lowestRank}`, `#${highestRank}`];
-                    } else if (lowestRank <= competition.requiredYesCount && 
-                             highestRank > competition.requiredYesCount) {
-                        tieType = 'yes_alt1';
-                        affectedPositions = ['YES', 'ALT1'];
-                    } else if (lowestRank <= (competition.requiredYesCount + competition.alternateCount) && 
-                              highestRank > (competition.requiredYesCount + competition.alternateCount)) {
-                        tieType = 'alt3_no';
-                        affectedPositions = [`ALT${competition.alternateCount}`, 'NO'];
-                    } else {
-                        // Tie between alternates
-                        const firstAltNum = lowestRank - competition.requiredYesCount;
-                        const lastAltNum = highestRank - competition.requiredYesCount;
-                        tieType = 'between_alts';
-                        affectedPositions = [`ALT${firstAltNum}`, `ALT${lastAltNum}`];
-                    }
-
-                    tieBreakers.push({
-                        competitorIds,
-                        type: tieType,
-                        affectedPositions
-                    });
-                }
-            }
-        });
-
-        // Third pass: update scores with meaningful tie information only
-        const updatedScores = rankedScores.map(score => ({
-            ...score,
-            tiedWith: meaningfulTies[score.competitorId] || []
-        }));
-
-        // Combine ranked scores with unscored competitors
-        const unscoredCompetitors = scores.filter(s => s.rawScore === null).map(s => ({
-            ...s,
-            rank: 0,
-            tiedWith: []
-        }));
-
-        // Return all scores in their original order
-        const finalScores = scores.map(originalScore => {
-            const updatedScore = updatedScores.find(s => s.competitorId === originalScore.competitorId);
-            return updatedScore || {
-                ...originalScore,
-                rank: 0,
-                tiedWith: []
-            };
-        });
-
-        return [finalScores, tieBreakers];
-    };
-
-    const handleScoreChange = (competitorId: string, newScore: number) => {
+    const handleScoreChange = (competitorId: string, newScore: number | null) => {
         setState(prev => {
-            // Get current role's scores
-            const currentScores = prev.scoresByRole[prev.currentRole] || [];
-            
-            // Update the score for the changed competitor
-            const newScores = currentScores.map(s =>
-                s.competitorId === competitorId ? { ...s, rawScore: newScore } : s
+            const updatedScores = prev.scores.map(score => 
+                score.competitorId === competitorId 
+                    ? { ...score, rawScore: newScore }
+                    : score
             );
-            
-            // Calculate new ranks but maintain original order
-            const [rankedScores, newTieBreakers] = calculateRanksAndTies(newScores);
-            
-            // Map ranked scores back to original order
-            const updatedScores = newScores.map(score => {
-                const rankedScore = rankedScores.find(r => r.competitorId === score.competitorId);
-                return {
-                    ...score,
-                    rank: rankedScore?.rank || score.rank,
-                    tiedWith: rankedScore?.tiedWith || []
-                };
-            });
-            
-            return {
-                ...prev,
-                scoresByRole: {
-                    ...prev.scoresByRole,
-                    [prev.currentRole]: updatedScores,
-                },
-                tieBreakers: newTieBreakers,
-            };
+            debouncedCalculateRanks(updatedScores);
+            return { ...prev, scores: updatedScores };
         });
     };
 
-    const getScoreColor = (score: CompetitorScore): string => {
-        if (score.rawScore === null) return '#9e9e9e'; // grey for unscored
-        const rank = score.rank || Infinity;
-        if (rank <= competition.requiredYesCount) return '#4caf50'; // YES - green
-        if (rank <= competition.requiredYesCount + competition.alternateCount) return '#2196f3'; // ALT - blue
-        return '#f44336'; // NO - red
+    const getScoreColor = (score: Score): string => {
+        if (!score.status) return '';
+        switch (score.status) {
+            case 'YES': return 'rgba(76, 175, 80, 0.1)';
+            case 'ALT': return 'rgba(255, 152, 0, 0.1)';
+            case 'NO': return 'rgba(244, 67, 54, 0.1)';
+            default: return '';
+        }
     };
 
-    const getCompetitorStyle = (score: CompetitorScore) => {
+    const getCompetitorStyle = (score: Score) => {
         const rank = score.rank || 0;
         const isYes = rank <= competition.requiredYesCount;
         const isAlt = rank > competition.requiredYesCount && 
@@ -313,7 +214,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
         };
     };
 
-    const getRankLabel = (score: CompetitorScore): string => {
+    const getRankLabel = (score: Score): string => {
         const rank = score.rank || 0;
         if (judge.isChiefJudge) {
             return `Rank: ${rank}`;
@@ -329,82 +230,55 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
     };
 
     const handleSubmit = async () => {
-        const currentScores = state.scoresByRole[state.currentRole] || [];
+        const finalScores = state.sortedScores || calculateRanksAndTies(state.scores);
         setState(prev => ({
             ...prev,
-            scoresByRole: {
-                ...prev.scoresByRole,
-                [prev.currentRole]: currentScores
-            }
+            scores: finalScores,
+            sortedScores: finalScores,
+            submitted: true
         }));
         setConfirmDialogOpen(true);
     };
 
     const handleConfirmSubmit = async () => {
+        const sheetId = `${competition.id}_${judge.id}_${currentRole.toLowerCase()}`;
+        const judgingSheet: JudgingSheetType = {
+            id: sheetId,
+            competitionId: competition.id,
+            judgeId: judge.id,
+            role: currentRole.toLowerCase() as 'leader' | 'follower',
+            scores: state.scores,
+            submitted: true
+        };
+
         try {
-            if (judge.isChiefJudge) {
-                // Submit a sheet for each role
-                await Promise.all(judge.roles.map(async role => {
-                    const sheet = {
-                        competitionId: competition.id,
-                        judgeId: judge.id,
-                        role: role,
-                        scores: state.scoresByRole[role] || [],
-                        isSubmitted: true,
-                        lastModified: Date.now(),
-                    };
-                    await db.saveJudgingSheet(sheet);
-                }));
-            } else {
-                // Regular judge - submit only current role
-                const sheet = {
-                    competitionId: competition.id,
-                    judgeId: judge.id,
-                    role: state.currentRole,
-                    scores: state.scoresByRole[state.currentRole] || [],
-                    isSubmitted: true,
-                    lastModified: Date.now(),
-                };
-                await db.saveJudgingSheet(sheet);
-            }
-
-            // Update judge status
-            const updatedJudge = { ...judge, status: 'submitted' as JudgeStatus };
-            const updatedCompetition = {
-                ...competition,
-                judges: competition.judges.map(j =>
-                    j.id === judge.id ? updatedJudge : j
-                ),
-            };
-            await db.saveCompetition(updatedCompetition);
-
-            setState(prev => ({ ...prev, submitted: true }));
-            setConfirmDialogOpen(false);
-        } catch (err) {
-            setError('Failed to submit scores');
-            setConfirmDialogOpen(false);
+            await db.saveJudgingSheet(judgingSheet);
+            onSubmit();
+        } catch (error) {
+            console.error('Error saving judging sheet:', error);
+            setError('Failed to save scores. Please try again.');
         }
     };
 
     // Sort competitors by bib number for display
-    const displayScores = [...(state.scoresByRole[state.currentRole] || [])].sort((a, b) => {
-        const competitorA = competition.competitors[state.currentRole].find(c => c.id === a.competitorId);
-        const competitorB = competition.competitors[state.currentRole].find(c => c.id === b.competitorId);
+    const displayScores = [...state.scores].sort((a, b) => {
+        const competitorA = competition.competitors[currentRole].find(c => c.id === a.competitorId);
+        const competitorB = competition.competitors[currentRole].find(c => c.id === b.competitorId);
         return (competitorA?.bibNumber || 0) - (competitorB?.bibNumber || 0);
     });
 
     const canSubmit = useCallback(() => {
         if (!judge.isChiefJudge) {
-            const currentScores = state.scoresByRole[state.currentRole] || [];
+            const currentScores = state.scores;
             return currentScores.every(score => score.rawScore !== null);
         }
         
         // For chief judges, check if all competitors in all roles are scored
         return judge.roles.every(role => {
-            const roleScores = state.scoresByRole[role] || [];
+            const roleScores = state.scores.filter(s => s.competitorId.startsWith(role));
             return roleScores.every(score => score.rawScore !== null);
         });
-    }, [state.scoresByRole, state.currentRole, judge.roles, judge.isChiefJudge]);
+    }, [state.scores, judge.roles, judge.isChiefJudge]);
 
     const handleTouchStart = (e: React.TouchEvent, competitorId: string, currentScore: number | null) => {
         setTouchStart({
@@ -424,8 +298,8 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
         // Use the larger of horizontal or vertical movement
         const diff = Math.abs(xDiff) > Math.abs(yDiff) ? xDiff : yDiff;
         
-        // Convert movement to score change (1 point per 5px)
-        const scoreChange = Math.round(diff / 5);
+        // Convert movement to score change (1 point per 10px)
+        const scoreChange = Math.round(diff / 10);
         const newScore = Math.max(0, Math.min(100, touchScore + scoreChange));
         
         if (newScore !== touchScore) {
@@ -464,7 +338,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
 
             {judge.roles.length > 1 && (
                 <Tabs
-                    value={state.currentRole}
+                    value={currentRole}
                     onChange={handleRoleChange}
                     sx={{ mb: 3 }}
                 >
@@ -480,6 +354,12 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
                 </Typography>
                 <Typography>
                     • Score each competitor from 0-100
+                </Typography>
+                <Typography>
+                    • Tap on a score and slide horizontally/vertically to adjust
+                </Typography>
+                <Typography>
+                    • Use +/- buttons for fine adjustments
                 </Typography>
                 {judge.isChiefJudge ? (
                     <>
@@ -513,7 +393,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
                     </TableHead>
                     <TableBody>
                         {displayScores.map((score) => {
-                            const competitor = competition.competitors[state.currentRole].find(
+                            const competitor = competition.competitors[currentRole].find(
                                 c => c.id === score.competitorId
                             );
                             if (!competitor) return null;
@@ -608,18 +488,6 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
                                                         </IconButton>
                                                     </Box>
                                                 )}
-                                                {isAdjusting && (
-                                                    <Typography 
-                                                        variant="caption" 
-                                                        sx={{ 
-                                                            display: 'block', 
-                                                            textAlign: 'center',
-                                                            mt: 1 
-                                                        }}
-                                                    >
-                                                        Slide horizontally or vertically to adjust
-                                                    </Typography>
-                                                )}
                                             </Grid>
                                         </Grid>
                                     </TableCell>
@@ -680,10 +548,9 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
                             : 'Please score all competitors before submitting.'}
                     </Alert>
                 )}
-                {state.tieBreakers.length > 0 && (
+                {state.scores.length > 0 && state.scores.length < competition.competitors[currentRole].length && (
                     <Alert severity="warning" sx={{ mb: 2 }}>
-                        {state.tieBreakers.length === 1 ? 'There is a tie' : 'There are ties'} that need
-                        to be resolved{judge.isChiefJudge ? '' : ' by the chief judge'}.
+                        {state.scores.length === 1 ? 'There is a competitor missing' : 'There are competitors missing'}
                     </Alert>
                 )}
                 <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>

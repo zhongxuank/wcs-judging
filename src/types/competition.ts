@@ -42,10 +42,12 @@ export type ResultType = 'YES' | 'NO' | 'ALT1' | 'ALT2' | 'ALT3';
 
 export interface Score {
     bibNumber: string;
-    rawScore: number;
+    competitorId: string;
+    rawScore: number | null;
     rank?: number;
     hasTie?: boolean;
     status?: 'YES' | 'ALT' | 'NO';
+    tiedWith?: string[];
 }
 
 export interface JudgingScore {

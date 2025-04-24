@@ -74,4 +74,4 @@ try {
     throw error;
 }
 
-export { firestore }; 
+export { firestore };

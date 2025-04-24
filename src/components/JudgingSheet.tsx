@@ -84,6 +84,12 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
     }, [competition, state.currentRole]);
 
     const calculateRanksAndTies = useCallback((scores: Score[]): Score[] => {
+        // Reset tie status before recalculating
+        scores.forEach(score => {
+            score.hasTie = false;
+            score.tiedWith = [];
+        });
+        
         // Sort scores from highest to lowest
         const sortedScores = [...scores].sort((a, b) => {
             const scoreA = a.rawScore ?? -Infinity;

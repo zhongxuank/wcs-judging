@@ -316,12 +316,24 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
 
     const handleTouchStart = (e: React.TouchEvent, competitorId: string, currentScore: number | null) => {
         const touch = e.touches[0];
+        const element = e.currentTarget as HTMLElement;
+        const rect = element.getBoundingClientRect();
+        
+        // Calculate initial score based on touch position
+        const touchX = touch.clientX - rect.left;
+        const initialScore = Math.max(0, Math.min(100, Math.round((touchX / rect.width) * 100)));
+        
         setTouchStart({
             x: touch.clientX,
             y: touch.clientY
         });
-        setTouchScore(currentScore ?? 0);
+        setTouchScore(currentScore ?? initialScore);
         setIsAdjusting(true);
+
+        // If starting from null, immediately set the initial score
+        if (currentScore === null) {
+            handleScoreChange(competitorId, initialScore);
+        }
     };
 
     const handleTouchMove = (e: React.TouchEvent, competitorId: string) => {
@@ -338,17 +350,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
         const newScore = Math.max(0, Math.min(100, baseScore + scoreDelta));
         
         // Update score immediately without debouncing
-        setState(prev => {
-            const updatedScores = prev.scores.map(score =>
-                score.competitorId === competitorId
-                    ? { ...score, rawScore: newScore }
-                    : score
-            );
-            return { ...prev, scores: updatedScores };
-        });
-
-        // Debounce the rank calculation
-        debouncedCalculateRanks(state.scores);
+        handleScoreChange(competitorId, newScore);
     };
 
     const handleTouchEnd = () => {
@@ -474,7 +476,12 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                                                             height: '60px',
                                                             bgcolor: 'action.hover',
                                                             borderRadius: 1,
+                                                            cursor: 'pointer',
+                                                            touchAction: 'pan-y'
                                                         }}
+                                                        onTouchStart={(e) => handleTouchStart(e, score.competitorId, null)}
+                                                        onTouchMove={(e) => handleTouchMove(e, score.competitorId)}
+                                                        onTouchEnd={handleTouchEnd}
                                                     >
                                                         <Typography color="text.secondary">
                                                             Slide to start scoring

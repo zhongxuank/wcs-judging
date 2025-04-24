@@ -16,5 +16,6 @@ export default defineConfig({
       }
     }
   },
-  envPrefix: 'VITE_'  // This ensures Vite picks up our environment variables
+  envPrefix: 'VITE_',  // This ensures Vite picks up our environment variables
+  publicDir: 'public'  // Ensure public directory is included in the build
 })

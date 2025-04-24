@@ -333,16 +333,11 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
         
         setTouchScore(currentScore ?? initialScore);
         setIsAdjusting(true);
-        // Prevent default scroll behavior ONLY when starting touch on the score cell
-        e.preventDefault(); 
     };
 
     const handleTouchMove = (e: React.TouchEvent, competitorId: string) => {
         if (!touchStart || touchScore === null) return;
         
-        // Prevent default scroll behavior while adjusting score
-        e.preventDefault(); 
-
         const scoreCell = e.currentTarget;
         const touch = e.touches[0];
         const rect = scoreCell.getBoundingClientRect();

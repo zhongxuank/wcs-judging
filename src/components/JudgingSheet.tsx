@@ -315,48 +315,42 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
     }, [state.scores, judge.roles, judge.isChiefJudge]);
 
     const handleTouchStart = (e: React.TouchEvent, competitorId: string, currentScore: number | null) => {
-        // Check if the touch is on the score cell itself or its children
-        const scoreCell = e.currentTarget;
         const touch = e.touches[0];
+        const scoreCell = e.currentTarget as HTMLElement;
+        const rect = scoreCell.getBoundingClientRect();
         
+        // Store the initial touch position and cell dimensions
         setTouchStart({
             x: touch.clientX,
             y: touch.clientY
         });
         
-        // Calculate initial score based on touch position within the cell
-        const rect = scoreCell.getBoundingClientRect();
-        const cellWidth = rect.width;
-        const touchX = touch.clientX - rect.left;
-        const scorePercent = Math.max(0, Math.min(100, (touchX / cellWidth) * 100)); 
-        const initialScore = Math.round(scorePercent);
-        
-        setTouchScore(currentScore ?? initialScore);
-        setIsAdjusting(true);
-
-        // If starting from null, immediately set the initial score
+        // Only set initial score if there isn't one already
         if (currentScore === null) {
+            const touchX = touch.clientX - rect.left;
+            const scorePercent = Math.max(0, Math.min(100, (touchX / rect.width) * 100));
+            const initialScore = Math.round(scorePercent);
             handleScoreChange(competitorId, initialScore);
         }
+        
+        setTouchScore(currentScore ?? 0);
+        setIsAdjusting(true);
     };
 
     const handleTouchMove = (e: React.TouchEvent, competitorId: string) => {
-        if (!touchStart || !isAdjusting) return;
+        if (!isAdjusting) return;
 
-        const scoreCell = e.currentTarget;
         const touch = e.touches[0];
+        const scoreCell = e.currentTarget as HTMLElement;
         const rect = scoreCell.getBoundingClientRect();
         
-        // Calculate score based on horizontal position within the cell
-        const cellWidth = rect.width;
-        const touchX = touch.clientX - rect.left;
-        const scorePercent = Math.max(0, Math.min(100, (touchX / cellWidth) * 100));
-        const newScore = Math.round(scorePercent);
+        // Calculate score based on current touch position
+        const touchX = Math.max(rect.left, Math.min(rect.right, touch.clientX));
+        const scorePercent = ((touchX - rect.left) / rect.width) * 100;
+        const newScore = Math.max(0, Math.min(100, Math.round(scorePercent)));
         
-        if (newScore !== touchScore) {
-            handleScoreChange(competitorId, newScore);
-            setTouchScore(newScore);
-        }
+        handleScoreChange(competitorId, newScore);
+        setTouchScore(newScore);
     };
 
     const handleTouchEnd = () => {
@@ -470,7 +464,11 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                                             </Typography>
                                         </Box>
                                     </TableCell>
-                                    <TableCell sx={{ width: '50%', position: 'relative', cursor: 'pointer', touchAction: 'pan-y' }}>
+                                    <TableCell sx={{ width: '50%', position: 'relative', cursor: 'pointer', touchAction: 'pan-y' }}
+                                        onTouchStart={(e) => handleTouchStart(e, score.competitorId, score.rawScore)}
+                                        onTouchMove={(e) => handleTouchMove(e, score.competitorId)}
+                                        onTouchEnd={handleTouchEnd}
+                                    >
                                         <Grid container spacing={2} alignItems="center">
                                             <Grid item xs={12}>
                                                 {score.rawScore === null ? (
@@ -485,9 +483,6 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                                                             cursor: 'pointer',
                                                             touchAction: 'pan-y'
                                                         }}
-                                                        onTouchStart={(e) => handleTouchStart(e, score.competitorId, null)}
-                                                        onTouchMove={(e) => handleTouchMove(e, score.competitorId)}
-                                                        onTouchEnd={handleTouchEnd}
                                                     >
                                                         <Typography color="text.secondary">
                                                             Slide to start scoring

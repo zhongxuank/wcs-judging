@@ -192,11 +192,11 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                 
                 return {
                      ...prev,
-                      scores: updatedMainScores, // Update main scores with new rank/tie info
-                      sortedScores: calculatedSortedScores // Keep the sorted version for potential use (e.g., submission)
+                      scores: updatedMainScores,
+                      sortedScores: calculatedSortedScores
                 };
             });
-        }, 50); // Keep debounce delay
+        }, 5); // Reduced from 50ms to 5ms for more responsive updates
     }, [calculateRanksAndTies]);
 
     const handleRoleChange = (_: React.SyntheticEvent, newRole: CompetitorRole) => {
@@ -315,43 +315,40 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
     }, [state.scores, judge.roles, judge.isChiefJudge]);
 
     const handleTouchStart = (e: React.TouchEvent, competitorId: string, currentScore: number | null) => {
-        // Check if the touch is on the score cell itself or its children
-        const scoreCell = e.currentTarget;
         const touch = e.touches[0];
-        
         setTouchStart({
             x: touch.clientX,
             y: touch.clientY
         });
-        
-        // Calculate initial score based on touch position within the cell
-        const rect = scoreCell.getBoundingClientRect();
-        const cellWidth = rect.width;
-        const touchX = touch.clientX - rect.left;
-        const scorePercent = Math.max(0, Math.min(100, (touchX / cellWidth) * 100)); 
-        const initialScore = Math.round(scorePercent);
-        
-        setTouchScore(currentScore ?? initialScore);
+        setTouchScore(currentScore ?? 0);
         setIsAdjusting(true);
     };
 
     const handleTouchMove = (e: React.TouchEvent, competitorId: string) => {
-        if (!touchStart || touchScore === null) return;
-        
-        const scoreCell = e.currentTarget;
+        if (!touchStart || !isAdjusting) return;
+
         const touch = e.touches[0];
-        const rect = scoreCell.getBoundingClientRect();
+        const deltaX = touch.clientX - touchStart.x;
         
-        // Calculate score based on horizontal position within the cell
-        const cellWidth = rect.width;
-        const touchX = touch.clientX - rect.left;
-        const scorePercent = Math.max(0, Math.min(100, (touchX / cellWidth) * 100));
-        const newScore = Math.round(scorePercent);
+        // Make the scoring less sensitive - 15 pixels per point
+        const sensitivity = 15; // pixels per point
+        const scoreDelta = Math.round(deltaX / sensitivity);
         
-        if (newScore !== touchScore) {
-            handleScoreChange(competitorId, newScore);
-            setTouchScore(newScore);
-        }
+        const baseScore = touchScore ?? 0;
+        const newScore = Math.max(0, Math.min(100, baseScore + scoreDelta));
+        
+        // Update score immediately without debouncing
+        setState(prev => {
+            const updatedScores = prev.scores.map(score =>
+                score.competitorId === competitorId
+                    ? { ...score, rawScore: newScore }
+                    : score
+            );
+            return { ...prev, scores: updatedScores };
+        });
+
+        // Debounce the rank calculation
+        debouncedCalculateRanks(state.scores);
     };
 
     const handleTouchEnd = () => {

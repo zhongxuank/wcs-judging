@@ -315,18 +315,22 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
     }, [state.scores, judge.roles, judge.isChiefJudge]);
 
     const handleTouchStart = (e: React.TouchEvent, competitorId: string, currentScore: number | null) => {
+        // Check if the touch is on the score cell itself or its children
+        const scoreCell = e.currentTarget;
         const touch = e.touches[0];
-        const element = e.currentTarget as HTMLElement;
-        const rect = element.getBoundingClientRect();
-        
-        // Calculate initial score based on touch position
-        const touchX = touch.clientX - rect.left;
-        const initialScore = Math.max(0, Math.min(100, Math.round((touchX / rect.width) * 100)));
         
         setTouchStart({
             x: touch.clientX,
             y: touch.clientY
         });
+        
+        // Calculate initial score based on touch position within the cell
+        const rect = scoreCell.getBoundingClientRect();
+        const cellWidth = rect.width;
+        const touchX = touch.clientX - rect.left;
+        const scorePercent = Math.max(0, Math.min(100, (touchX / cellWidth) * 100)); 
+        const initialScore = Math.round(scorePercent);
+        
         setTouchScore(currentScore ?? initialScore);
         setIsAdjusting(true);
 
@@ -339,18 +343,20 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
     const handleTouchMove = (e: React.TouchEvent, competitorId: string) => {
         if (!touchStart || !isAdjusting) return;
 
+        const scoreCell = e.currentTarget;
         const touch = e.touches[0];
-        const deltaX = touch.clientX - touchStart.x;
+        const rect = scoreCell.getBoundingClientRect();
         
-        // Make the scoring less sensitive - 15 pixels per point
-        const sensitivity = 15; // pixels per point
-        const scoreDelta = Math.round(deltaX / sensitivity);
+        // Calculate score based on horizontal position within the cell
+        const cellWidth = rect.width;
+        const touchX = touch.clientX - rect.left;
+        const scorePercent = Math.max(0, Math.min(100, (touchX / cellWidth) * 100));
+        const newScore = Math.round(scorePercent);
         
-        const baseScore = touchScore ?? 0;
-        const newScore = Math.max(0, Math.min(100, baseScore + scoreDelta));
-        
-        // Update score immediately without debouncing
-        handleScoreChange(competitorId, newScore);
+        if (newScore !== touchScore) {
+            handleScoreChange(competitorId, newScore);
+            setTouchScore(newScore);
+        }
     };
 
     const handleTouchEnd = () => {

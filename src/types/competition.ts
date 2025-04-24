@@ -33,6 +33,9 @@ export interface Competition {
     competitors: {
         [key in CompetitorRole]: Competitor[];
     };
+    requiredYesCount: number;
+    advancingCount: number;
+    alternateCount: number;
 }
 
 export type ResultType = 'YES' | 'NO' | 'ALT1' | 'ALT2' | 'ALT3';

@@ -23,10 +23,14 @@ import {
     TableContainer,
     TableHead,
     TableRow,
+    IconButton,
+    TextField,
 } from '@mui/material';
 import { Competition, Judge, CompetitorRole, JudgeStatus, ResultType } from '../types/competition';
 import { JudgingSheet as JudgingSheetType, CompetitorScore, TieInfo } from '../types/judging';
 import { db } from '../services/db';
+import AddIcon from '@mui/icons-material/Add';
+import RemoveIcon from '@mui/icons-material/Remove';
 
 interface JudgingSheetProps {
     competition: Competition;
@@ -62,6 +66,9 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
     });
     const [error, setError] = useState<string | null>(null);
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+    const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
+    const [touchScore, setTouchScore] = useState<number | null>(null);
+    const [isAdjusting, setIsAdjusting] = useState(false);
 
     // Create a debounced version of calculateRanksAndTies
     const debouncedCalculateRanks = useCallback(() => {
@@ -399,6 +406,53 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
         });
     }, [state.scoresByRole, state.currentRole, judge.roles, judge.isChiefJudge]);
 
+    const handleTouchStart = (e: React.TouchEvent, competitorId: string, currentScore: number | null) => {
+        setTouchStart({
+            x: e.touches[0].clientX,
+            y: e.touches[0].clientY
+        });
+        setTouchScore(currentScore ?? 50);
+        setIsAdjusting(true);
+    };
+
+    const handleTouchMove = (e: React.TouchEvent, competitorId: string) => {
+        if (!touchStart || touchScore === null) return;
+
+        const xDiff = e.touches[0].clientX - touchStart.x;
+        const yDiff = touchStart.y - e.touches[0].clientY; // Inverted for intuitive up/down
+
+        // Use the larger of horizontal or vertical movement
+        const diff = Math.abs(xDiff) > Math.abs(yDiff) ? xDiff : yDiff;
+        
+        // Convert movement to score change (1 point per 5px)
+        const scoreChange = Math.round(diff / 5);
+        const newScore = Math.max(0, Math.min(100, touchScore + scoreChange));
+        
+        if (newScore !== touchScore) {
+            handleScoreChange(competitorId, newScore);
+            setTouchScore(newScore);
+        }
+    };
+
+    const handleTouchEnd = () => {
+        setTouchStart(null);
+        setTouchScore(null);
+        setIsAdjusting(false);
+    };
+
+    const handleScoreAdjust = (competitorId: string, currentScore: number | null, delta: number) => {
+        const baseScore = currentScore ?? 50;
+        const newScore = Math.max(0, Math.min(100, baseScore + delta));
+        handleScoreChange(competitorId, newScore);
+    };
+
+    const handleDirectInput = (competitorId: string, value: string) => {
+        const numValue = parseInt(value);
+        if (!isNaN(numValue) && numValue >= 0 && numValue <= 100) {
+            handleScoreChange(competitorId, numValue);
+        }
+    };
+
     return (
         <Box sx={{ maxWidth: 800, mx: 'auto', mt: 4, p: 2 }}>
             <Typography variant="h4" gutterBottom>
@@ -485,14 +539,14 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
                                     </TableCell>
                                     <TableCell sx={{ width: '50%' }}>
                                         <Grid container spacing={2} alignItems="center">
-                                            <Grid item xs={9}>
+                                            <Grid item xs={12}>
                                                 {score.rawScore === null ? (
                                                     <Box 
                                                         sx={{ 
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center',
-                                                            height: '40px',
+                                                            height: '60px',
                                                             bgcolor: 'action.hover',
                                                             borderRadius: 1,
                                                             cursor: 'pointer'
@@ -500,39 +554,72 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge }) => {
                                                         onClick={() => handleScoreChange(score.competitorId, 50)}
                                                     >
                                                         <Typography color="text.secondary">
-                                                            Click to score
+                                                            Tap to start scoring
                                                         </Typography>
                                                     </Box>
                                                 ) : (
-                                                    <Slider
-                                                        value={score.rawScore}
-                                                        onChange={(_, value) => handleScoreChange(score.competitorId, value as number)}
-                                                        min={0}
-                                                        max={100}
-                                                        step={1}
-                                                        disabled={state.submitted}
+                                                    <Box
                                                         sx={{
-                                                            '& .MuiSlider-thumb': {
-                                                                bgcolor: getScoreColor(score),
-                                                            },
-                                                            '& .MuiSlider-track': {
-                                                                bgcolor: getScoreColor(score),
-                                                            },
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: 1,
+                                                            touchAction: 'none', // Prevents scrolling while adjusting
                                                         }}
-                                                    />
+                                                        onTouchStart={(e) => handleTouchStart(e, score.competitorId, score.rawScore)}
+                                                        onTouchMove={(e) => handleTouchMove(e, score.competitorId)}
+                                                        onTouchEnd={handleTouchEnd}
+                                                    >
+                                                        <IconButton 
+                                                            onClick={() => handleScoreAdjust(score.competitorId, score.rawScore, -1)}
+                                                            sx={{ p: 1 }}
+                                                        >
+                                                            <RemoveIcon />
+                                                        </IconButton>
+                                                        
+                                                        <TextField
+                                                            value={score.rawScore}
+                                                            onChange={(e) => handleDirectInput(score.competitorId, e.target.value)}
+                                                            type="number"
+                                                            inputProps={{ 
+                                                                min: 0, 
+                                                                max: 100,
+                                                                style: { 
+                                                                    textAlign: 'center',
+                                                                    fontSize: '1.2rem',
+                                                                    padding: '8px',
+                                                                    width: '60px'
+                                                                }
+                                                            }}
+                                                            variant="outlined"
+                                                            size="small"
+                                                            sx={{
+                                                                '& .MuiOutlinedInput-root': {
+                                                                    bgcolor: getScoreColor(score),
+                                                                    color: 'white',
+                                                                }
+                                                            }}
+                                                        />
+                                                        
+                                                        <IconButton 
+                                                            onClick={() => handleScoreAdjust(score.competitorId, score.rawScore, 1)}
+                                                            sx={{ p: 1 }}
+                                                        >
+                                                            <AddIcon />
+                                                        </IconButton>
+                                                    </Box>
                                                 )}
-                                            </Grid>
-                                            <Grid item xs={3}>
-                                                <Typography 
-                                                    variant="body1" 
-                                                    sx={{ 
-                                                        color: getScoreColor(score),
-                                                        fontWeight: 'bold',
-                                                        textAlign: 'right'
-                                                    }}
-                                                >
-                                                    {score.rawScore === null ? '-' : score.rawScore}
-                                                </Typography>
+                                                {isAdjusting && (
+                                                    <Typography 
+                                                        variant="caption" 
+                                                        sx={{ 
+                                                            display: 'block', 
+                                                            textAlign: 'center',
+                                                            mt: 1 
+                                                        }}
+                                                    >
+                                                        Slide horizontally or vertically to adjust
+                                                    </Typography>
+                                                )}
                                             </Grid>
                                         </Grid>
                                     </TableCell>

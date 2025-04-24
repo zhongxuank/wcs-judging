@@ -65,8 +65,7 @@ const AppContent: React.FC = () => {
 
     const loadCompetitions = async () => {
         try {
-            await db.init()
-            const comps = await db.getAllCompetitions()
+            const comps = await db.getCompetitions()
             setCompetitions(comps)
         } catch (error) {
             console.error('Failed to load competitions:', error)

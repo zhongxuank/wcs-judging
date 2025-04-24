@@ -22,27 +22,20 @@ export interface Judge {
 export interface Competition {
     id: string;
     name: string;
-    type: CompetitionType;
-    status: CompetitionStatus;
+    date: string;
+    status: 'pending' | 'in_progress' | 'completed';
     judges: Judge[];
-    competitors: {
-        [K in CompetitorRole]: Competitor[];
-    };
-    requiredYesCount: number;
-    advancingCount: number;
-    alternateCount: number;
+    competitors: Competitor[];
 }
 
 export type ResultType = 'YES' | 'NO' | 'ALT1' | 'ALT2' | 'ALT3';
 
 export interface Score {
-    id: string;
-    competitionId: string;
-    judgeId: string;
-    competitorId: string;
+    bibNumber: string;
     rawScore: number;
-    timestamp: number;
-    calculatedResult?: number;
+    rank?: number;
+    hasTie?: boolean;
+    status?: 'YES' | 'ALT' | 'NO';
 }
 
 export interface JudgingScore {
@@ -52,12 +45,12 @@ export interface JudgingScore {
 }
 
 export interface JudgingSheet {
+    id: string;
     competitionId: string;
     judgeId: string;
-    role: CompetitorRole;
-    scores: JudgingScore[];
-    isSubmitted: boolean;
-    lastModified: number;
+    role: 'leader' | 'follower';
+    scores: Score[];
+    submitted: boolean;
 }
 
 export interface DB {

@@ -498,8 +498,9 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                                                         }}
                                                     >
                                                         <IconButton 
-                                                            onClick={() => handleScoreAdjust(score.competitorId, score.rawScore, -1)}
+                                                            onClick={() => handleScoreAdjust(score.competitorId, score.rawScore, -0.1)}
                                                             sx={{ p: 1 }}
+                                                            disabled={score.rawScore === null || score.rawScore <= 0}
                                                         >
                                                             <RemoveIcon />
                                                         </IconButton>
@@ -532,12 +533,13 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                                                                 fontWeight: 'bold'
                                                             }}
                                                         >
-                                                            {score.rawScore}
+                                                            {score.rawScore !== null ? score.rawScore.toFixed(1) : '-'}
                                                         </Typography>
                                                         
                                                         <IconButton 
-                                                            onClick={() => handleScoreAdjust(score.competitorId, score.rawScore, 1)}
+                                                            onClick={() => handleScoreAdjust(score.competitorId, score.rawScore, 0.1)}
                                                             sx={{ p: 1 }}
+                                                            disabled={score.rawScore === null || score.rawScore >= 100}
                                                         >
                                                             <AddIcon />
                                                         </IconButton>

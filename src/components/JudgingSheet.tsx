@@ -36,7 +36,6 @@ type JudgingSheetType = CompetitionJudgingSheet;
 interface JudgingSheetProps {
     competition: Competition;
     judge: Judge;
-    currentRole: CompetitorRole;
     onSubmit: () => void;
 }
 
@@ -44,6 +43,7 @@ interface JudgingState {
     scores: Score[];
     sortedScores: Score[] | null;
     submitted: boolean;
+    currentRole: CompetitorRole;
 }
 
 interface TieInfo {
@@ -52,11 +52,12 @@ interface TieInfo {
     affectedPositions: string[];
 }
 
-const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, currentRole, onSubmit }) => {
+const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmit }) => {
     const [state, setState] = useState<JudgingState>({
         scores: [],
         sortedScores: null,
-        submitted: false
+        submitted: false,
+        currentRole: judge.roles[0]
     });
 
     const [error, setError] = useState<string | null>(null);
@@ -69,7 +70,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, current
 
     useEffect(() => {
         // Initialize scores for current role
-        const competitors = competition.competitors[currentRole] || [];
+        const competitors = competition.competitors[state.currentRole] || [];
         const initialScores: Score[] = competitors.map(competitor => ({
             bibNumber: competitor.bibNumber.toString(),
             competitorId: competitor.id,
@@ -80,7 +81,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, current
             tiedWith: []
         }));
         setState(prev => ({ ...prev, scores: initialScores }));
-    }, [competition, currentRole]);
+    }, [competition, state.currentRole]);
 
     const calculateRanksAndTies = useCallback((scores: Score[]): Score[] => {
         // Sort scores from highest to lowest
@@ -241,12 +242,12 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, current
     };
 
     const handleConfirmSubmit = async () => {
-        const sheetId = `${competition.id}_${judge.id}_${currentRole.toLowerCase()}`;
+        const sheetId = `${competition.id}_${judge.id}_${state.currentRole.toLowerCase()}`;
         const judgingSheet: JudgingSheetType = {
             id: sheetId,
             competitionId: competition.id,
             judgeId: judge.id,
-            role: currentRole.toLowerCase() as 'leader' | 'follower',
+            role: state.currentRole.toLowerCase() as 'leader' | 'follower',
             scores: state.scores,
             submitted: true
         };
@@ -262,8 +263,8 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, current
 
     // Sort competitors by bib number for display
     const displayScores = [...state.scores].sort((a, b) => {
-        const competitorA = competition.competitors[currentRole].find(c => c.id === a.competitorId);
-        const competitorB = competition.competitors[currentRole].find(c => c.id === b.competitorId);
+        const competitorA = competition.competitors[state.currentRole].find(c => c.id === a.competitorId);
+        const competitorB = competition.competitors[state.currentRole].find(c => c.id === b.competitorId);
         return (competitorA?.bibNumber || 0) - (competitorB?.bibNumber || 0);
     });
 
@@ -338,7 +339,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, current
 
             {judge.roles.length > 1 && (
                 <Tabs
-                    value={currentRole}
+                    value={state.currentRole}
                     onChange={handleRoleChange}
                     sx={{ mb: 3 }}
                 >
@@ -393,7 +394,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, current
                     </TableHead>
                     <TableBody>
                         {displayScores.map((score) => {
-                            const competitor = competition.competitors[currentRole].find(
+                            const competitor = competition.competitors[state.currentRole].find(
                                 c => c.id === score.competitorId
                             );
                             if (!competitor) return null;
@@ -548,7 +549,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, current
                             : 'Please score all competitors before submitting.'}
                     </Alert>
                 )}
-                {state.scores.length > 0 && state.scores.length < competition.competitors[currentRole].length && (
+                {state.scores.length > 0 && state.scores.length < competition.competitors[state.currentRole].length && (
                     <Alert severity="warning" sx={{ mb: 2 }}>
                         {state.scores.length === 1 ? 'There is a competitor missing' : 'There are competitors missing'}
                     </Alert>

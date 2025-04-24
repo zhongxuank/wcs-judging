@@ -20,7 +20,7 @@ import {
     ToggleButtonGroup,
     IconButton,
 } from '@mui/material';
-import { Competition, CompetitorRole, Judge, CompetitionType, Competitor } from '../types/competition';
+import { Competition, CompetitionStatus, CompetitorRole, Judge, CompetitionType, Competitor } from '../types/competition';
 import { v4 as uuidv4 } from 'uuid';
 import Papa from 'papaparse';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -325,7 +325,7 @@ const CompetitionSetup: React.FC<CompetitionSetupProps> = ({
                 id: uuidv4(),
                 name: competitionName,
                 type: competitionType,
-                status: 'pending',
+                status: CompetitionStatus.PENDING,
                 judges: judges.map(j => ({
                     id: j.id,
                     name: j.name,

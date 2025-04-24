@@ -1,6 +1,10 @@
 export type CompetitorRole = 'Leader' | 'Follower';
 export type JudgeRole = 'ChiefJudge' | 'Judge';
-export type CompetitionStatus = 'pending' | 'active' | 'completed';
+export enum CompetitionStatus {
+    PENDING = 'pending',
+    IN_PROGRESS = 'in_progress',
+    COMPLETED = 'completed'
+}
 export type CompetitionType = 'Prelim' | 'Final';
 export type JudgeStatus = 'pending' | 'submitted';
 
@@ -23,9 +27,12 @@ export interface Competition {
     id: string;
     name: string;
     date: string;
-    status: 'pending' | 'in_progress' | 'completed';
+    type: CompetitionType;
+    status: CompetitionStatus;
     judges: Judge[];
-    competitors: Competitor[];
+    competitors: {
+        [key in CompetitorRole]: Competitor[];
+    };
 }
 
 export type ResultType = 'YES' | 'NO' | 'ALT1' | 'ALT2' | 'ALT3';

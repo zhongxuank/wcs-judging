@@ -414,8 +414,9 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                                     sx={{
                                         backgroundColor: score.hasTie ? 'warning.light' : 'inherit',
                                         cursor: 'pointer',
-                                        touchAction: 'none', // Prevents scrolling while adjusting
-                                        transition: 'background-color 0.2s'
+                                        touchAction: 'pan-y', // Allow vertical scroll, capture horizontal
+                                        transition: 'background-color 0.2s',
+                                        position: 'relative', // For positioning the score bar
                                     }}
                                     onTouchStart={(e) => handleTouchStart(e, score.competitorId, score.rawScore)}
                                     onTouchMove={(e) => handleTouchMove(e, score.competitorId)}
@@ -433,7 +434,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                                             </Typography>
                                         </Box>
                                     </TableCell>
-                                    <TableCell sx={{ width: '50%' }}>
+                                    <TableCell sx={{ width: '50%', position: 'relative' }}>
                                         <Grid container spacing={2} alignItems="center">
                                             <Grid item xs={12}>
                                                 {score.rawScore === null ? (
@@ -508,6 +509,31 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                                                 )}
                                             </Grid>
                                         </Grid>
+                                        {/* Visual Score Bar */}                                    
+                                        {score.rawScore !== null && (
+                                            <Box
+                                                sx={{
+                                                    position: 'absolute',
+                                                    bottom: 0,
+                                                    left: '5%', // Align with the central scoring area roughly
+                                                    right: '5%',
+                                                    height: '4px',
+                                                    bgcolor: 'action.disabledBackground',
+                                                    borderRadius: '2px',
+                                                    overflow: 'hidden',
+                                                }}
+                                            >
+                                                <Box
+                                                    sx={{
+                                                        height: '100%',
+                                                        width: `${score.rawScore}%`,
+                                                        bgcolor: getScoreColor(score) || 'primary.main',
+                                                        borderRadius: '2px',
+                                                        transition: 'width 0.1s ease-out',
+                                                    }}
+                                                />
+                                            </Box>
+                                        )}
                                     </TableCell>
                                     <TableCell>
                                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'space-between' }}>

@@ -1,59 +1,122 @@
-import { collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, where, DocumentData } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, deleteDoc, query, where, DocumentData, Firestore, CollectionReference, Timestamp } from 'firebase/firestore';
 import { firestore } from './firebase';
-import { Competition, JudgingSheet } from '../types/competition';
+import { Competition } from '../types/competition';
+import { JudgingSheet } from '../types/judging';
 
 class DatabaseService {
-    private competitionsCollection = collection(firestore, 'competitions');
-    private judgingSheetsCollection = collection(firestore, 'judgingSheets');
+    private competitionsCollection: CollectionReference<DocumentData>;
+    private judgingSheetsCollection: CollectionReference<DocumentData>;
+
+    constructor() {
+        if (!firestore) {
+            throw new Error('Firestore is not initialized');
+        }
+        this.competitionsCollection = collection(firestore, 'competitions');
+        this.judgingSheetsCollection = collection(firestore, 'judgingSheets');
+    }
 
     async getCompetition(id: string): Promise<Competition | null> {
-        const docRef = doc(this.competitionsCollection, id);
-        const docSnap = await getDoc(docRef);
-        if (!docSnap.exists()) return null;
-        return { id: docSnap.id, ...docSnap.data() } as Competition;
+        try {
+            const docRef = doc(this.competitionsCollection, id);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                return { id: docSnap.id, ...docSnap.data() } as Competition;
+            }
+            return null;
+        } catch (error) {
+            console.error('Error getting competition:', error);
+            throw error;
+        }
     }
 
     async getCompetitions(): Promise<Competition[]> {
-        const querySnapshot = await getDocs(this.competitionsCollection);
-        return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Competition);
+        try {
+            const querySnapshot = await getDocs(this.competitionsCollection);
+            return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Competition));
+        } catch (error) {
+            console.error('Error getting competitions:', error);
+            throw error;
+        }
     }
 
     async saveCompetition(competition: Competition): Promise<void> {
-        const { id, ...data } = competition;
-        await setDoc(doc(this.competitionsCollection, id), data);
+        try {
+            const { id, ...competitionData } = competition;
+            await setDoc(doc(this.competitionsCollection, id), competitionData);
+        } catch (error) {
+            console.error('Error saving competition:', error);
+            throw error;
+        }
     }
 
     async deleteCompetition(id: string): Promise<void> {
-        // First delete all judging sheets for this competition
-        const sheetsQuery = query(this.judgingSheetsCollection, where('competitionId', '==', id));
-        const sheetsSnapshot = await getDocs(sheetsQuery);
-        const deletePromises = sheetsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(deletePromises);
-        
-        // Then delete the competition
-        await deleteDoc(doc(this.competitionsCollection, id));
+        try {
+            await deleteDoc(doc(this.competitionsCollection, id));
+        } catch (error) {
+            console.error('Error deleting competition:', error);
+            throw error;
+        }
     }
 
-    async getJudgingSheet(id: string): Promise<JudgingSheet | null> {
-        const docRef = doc(this.judgingSheetsCollection, id);
-        const docSnap = await getDoc(docRef);
-        if (!docSnap.exists()) return null;
-        return { id: docSnap.id, ...docSnap.data() } as JudgingSheet;
+    async getJudgingSheet(competitionId: string, judgeId: string, role: string): Promise<JudgingSheet | null> {
+        try {
+            const q = query(
+                this.judgingSheetsCollection,
+                where('competitionId', '==', competitionId),
+                where('judgeId', '==', judgeId),
+                where('role', '==', role.toLowerCase())
+            );
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+                const doc = querySnapshot.docs[0];
+                return { id: doc.id, ...doc.data() } as JudgingSheet;
+            }
+            return null;
+        } catch (error) {
+            console.error('Error getting judging sheet:', error);
+            throw error;
+        }
     }
 
-    async getJudgingSheets(competitionId: string): Promise<JudgingSheet[]> {
-        const sheetsQuery = query(this.judgingSheetsCollection, where('competitionId', '==', competitionId));
-        const querySnapshot = await getDocs(sheetsQuery);
-        return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as JudgingSheet);
+    async getJudgingSheets(competitionId: string, role: string): Promise<JudgingSheet[]> {
+        try {
+            const q = query(
+                this.judgingSheetsCollection,
+                where('competitionId', '==', competitionId),
+                where('role', '==', role.toLowerCase())
+            );
+            const querySnapshot = await getDocs(q);
+            return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as JudgingSheet));
+        } catch (error) {
+            console.error('Error getting judging sheets:', error);
+            throw error;
+        }
     }
 
-    async saveJudgingSheet(sheet: JudgingSheet): Promise<void> {
-        const { id, ...data } = sheet;
-        await setDoc(doc(this.judgingSheetsCollection, id), data);
+    async saveJudgingSheet(judgingSheet: JudgingSheet): Promise<void> {
+        try {
+            const { id, ...sheetData } = judgingSheet;
+            const now = Timestamp.now();
+            
+            await setDoc(doc(this.judgingSheetsCollection, id), {
+                ...sheetData,
+                role: sheetData.role.toLowerCase(),
+                updatedAt: now,
+                createdAt: sheetData.createdAt || now
+            });
+        } catch (error) {
+            console.error('Error saving judging sheet:', error);
+            throw error;
+        }
     }
 
     async deleteJudgingSheet(id: string): Promise<void> {
-        await deleteDoc(doc(this.judgingSheetsCollection, id));
+        try {
+            await deleteDoc(doc(this.judgingSheetsCollection, id));
+        } catch (error) {
+            console.error('Error deleting judging sheet:', error);
+            throw error;
+        }
     }
 }
 

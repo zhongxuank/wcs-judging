@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import { getFirestore, enableIndexedDbPersistence, Firestore } from 'firebase/firestore';
 import { FirebaseError } from 'firebase/app';
 
 // Your web app's Firebase configuration from environment variables
@@ -37,7 +37,7 @@ console.log('- Storage Bucket:', firebaseConfig.storageBucket ? 'Present' : 'Mis
 console.log('- Messaging Sender ID:', firebaseConfig.messagingSenderId ? 'Present' : 'Missing');
 console.log('- App ID:', firebaseConfig.appId ? 'Present' : 'Missing');
 
-let firestore;
+let firestore: Firestore;
 
 try {
     // Initialize Firebase

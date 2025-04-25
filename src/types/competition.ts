@@ -1,3 +1,5 @@
+import { Timestamp } from 'firebase/firestore';
+
 export type CompetitorRole = 'Leader' | 'Follower';
 export type JudgeRole = 'ChiefJudge' | 'Judge';
 export enum CompetitionStatus {
@@ -63,7 +65,9 @@ export interface JudgingSheet {
     role: 'leader' | 'follower';
     scores: Score[];
     submitted: boolean;
-    lastUpdated: number; // Unix timestamp in milliseconds
+    lastUpdated: number;
+    createdAt?: Timestamp;
+    updatedAt?: Timestamp;
 }
 
 export interface DB {

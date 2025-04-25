@@ -1,4 +1,4 @@
-import { CompetitorRole, ResultType } from './competition';
+import { CompetitorRole, ResultType, Score } from './competition';
 
 export interface CompetitorScore {
     competitorId: string;
@@ -9,12 +9,13 @@ export interface CompetitorScore {
 }
 
 export interface JudgingSheet {
+    id: string;
     competitionId: string;
     judgeId: string;
-    role: CompetitorRole;
-    scores: CompetitorScore[];
-    isSubmitted: boolean;
-    lastModified: number;
+    role: 'leader' | 'follower';
+    scores: Score[];
+    submitted: boolean;
+    lastUpdated: number; // Unix timestamp in milliseconds
 }
 
 export interface TieInfo {

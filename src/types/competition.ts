@@ -45,9 +45,9 @@ export interface Score {
     competitorId: string;
     rawScore: number | null;
     rank?: number;
-    hasTie?: boolean;
+    hasTie: boolean;
     status?: 'YES' | 'ALT' | 'NO';
-    tiedWith?: string[];
+    tiedWith: string[];
 }
 
 export interface JudgingScore {
@@ -63,6 +63,7 @@ export interface JudgingSheet {
     role: 'leader' | 'follower';
     scores: Score[];
     submitted: boolean;
+    lastUpdated: number; // Unix timestamp in milliseconds
 }
 
 export interface DB {

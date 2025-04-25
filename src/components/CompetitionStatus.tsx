@@ -46,8 +46,8 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
 
     const loadJudgingSheets = async () => {
         try {
-            const sheets = await db.getAllJudgingSheets(competition.id);
-            setJudgingSheets(sheets.filter(sheet => sheet.isSubmitted)); // Only show submitted sheets
+            const sheets = await db.getJudgingSheets(competition.id);
+            setJudgingSheets(sheets); // Show all sheets, not just submitted ones
             setLoading(false);
         } catch (error) {
             console.error('Failed to load judging sheets:', error);
@@ -143,18 +143,23 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
         setCurrentRole(newRole);
     };
 
-    // Get only judges who have submitted scores for the current role
-    const getSubmittedJudges = (): Judge[] => {
-        const submittedJudgeIds = new Set(
+    // Get all judges, including those with in-progress scores
+    const getActiveJudges = (): Judge[] => {
+        const activeJudgeIds = new Set(
             judgingSheets
-                .filter(sheet => sheet.role === currentRole && sheet.isSubmitted)
+                .filter(sheet => sheet.role === currentRole)
                 .map(sheet => sheet.judgeId)
         );
         return competition.judges
-            .filter(judge => !judge.isChiefJudge && submittedJudgeIds.has(judge.id));
+            .filter(judge => !judge.isChiefJudge && activeJudgeIds.has(judge.id));
     };
 
-    const submittedJudges = getSubmittedJudges();
+    const handleEditScores = (judgeId: string) => {
+        // Navigate to JudgingSheet component with the judge's existing scores
+        window.location.href = `#/competition/${competition.id}/judge/${judgeId}`;
+    };
+
+    const submittedJudges = getActiveJudges();
     const competitorResults = getCompetitorResults(currentRole);
 
     const getStatusColor = (status: string): 'success' | 'info' | 'error' => {
@@ -187,6 +192,12 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
                 {competition.name} - Results
             </Typography>
 
+            <Tabs value={currentRole} onChange={handleRoleChange} sx={{ mb: 3 }}>
+                {['Leader', 'Follower'].map(role => (
+                    <Tab key={role} label={`${role}s`} value={role} />
+                ))}
+            </Tabs>
+
             <Box sx={{ mb: 2 }}>
                 <Typography variant="subtitle1" gutterBottom>
                     Score Legend:
@@ -200,15 +211,6 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
                 </Box>
             </Box>
 
-            <Tabs
-                value={currentRole}
-                onChange={handleRoleChange}
-                sx={{ mb: 3 }}
-            >
-                <Tab label="Leaders" value="Leader" />
-                <Tab label="Followers" value="Follower" />
-            </Tabs>
-
             <TableContainer component={Paper}>
                 <Table>
                     <TableHead>
@@ -218,10 +220,25 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
                             <TableCell align="center">Chief Judge Rank</TableCell>
                             {submittedJudges.map(judge => (
                                 <TableCell key={judge.id} align="center">
-                                    {judge.name}
-                                    <Typography variant="caption" color="text.secondary" display="block">
-                                        Score (Status)
-                                    </Typography>
+                                    <Box>
+                                        {judge.name}
+                                        <Typography variant="caption" display="block">
+                                            {judgingSheets.find(s => s.judgeId === judge.id && s.role === currentRole)?.submitted 
+                                                ? 'Submitted'
+                                                : 'In Progress'}
+                                        </Typography>
+                                        <Typography
+                                            variant="caption"
+                                            sx={{ 
+                                                cursor: 'pointer', 
+                                                color: 'primary.main',
+                                                '&:hover': { textDecoration: 'underline' }
+                                            }}
+                                            onClick={() => handleEditScores(judge.id)}
+                                        >
+                                            Edit Scores
+                                        </Typography>
+                                    </Box>
                                 </TableCell>
                             ))}
                         </TableRow>
@@ -229,10 +246,14 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
                     <TableBody>
                         {competitorResults.map(competitor => (
                             <TableRow key={competitor.id}>
-                                <TableCell>#{competitor.bibNumber}</TableCell>
+                                <TableCell>{competitor.bibNumber}</TableCell>
                                 <TableCell>{competitor.name}</TableCell>
                                 <TableCell align="center">
-                                    {competitor.chiefJudgeRank !== null ? `#${competitor.chiefJudgeRank}` : '-'}
+                                    {competitor.chiefJudgeRank !== null ? (
+                                        <Typography variant="body1" fontWeight="bold">
+                                            #{competitor.chiefJudgeRank}
+                                        </Typography>
+                                    ) : '-'}
                                 </TableCell>
                                 {submittedJudges.map(judge => {
                                     const score = competitor.regularJudgeScores[judge.id];
@@ -240,14 +261,14 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
                                         <TableCell key={judge.id} align="center">
                                             {score ? (
                                                 <Box>
-                                                    <Typography sx={getStatusStyle(score.status)}>
-                                                        {score.calculatedScore.toFixed(1)}
+                                                    <Typography variant="body2">
+                                                        Raw: {score.rawScore?.toFixed(1) ?? '-'}
                                                     </Typography>
                                                     <Chip
                                                         label={score.status}
-                                                        color={getStatusColor(score.status)}
                                                         size="small"
-                                                        sx={{ mt: 0.5 }}
+                                                        color={getStatusColor(score.status)}
+                                                        sx={{ mt: 1 }}
                                                     />
                                                 </Box>
                                             ) : '-'}

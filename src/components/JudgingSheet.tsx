@@ -77,21 +77,6 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
     const [touchScore, setTouchScore] = useState<number | null>(null);
     const [isAdjusting, setIsAdjusting] = useState(false);
 
-    useEffect(() => {
-        // Initialize scores for current role
-        const competitors = competition.competitors[state.currentRole] || [];
-        const initialScores: Score[] = competitors.map(competitor => ({
-            bibNumber: competitor.bibNumber.toString(),
-            competitorId: competitor.id,
-            rawScore: null,
-            rank: undefined,
-            hasTie: false,
-            status: undefined,
-            tiedWith: []
-        }));
-        setState(prev => ({ ...prev, scores: initialScores, sortedScores: null })); // Reset sortedScores on role change
-    }, [competition, state.currentRole]);
-
     const calculateRanksAndTies = useCallback((scoresToProcess: Score[]): Score[] => {
         // Create a deep copy to avoid mutating the original state scores directly
         let workingScores = JSON.parse(JSON.stringify(scoresToProcess)) as Score[];
@@ -167,6 +152,65 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
         return workingScores;
 
     }, [competition.requiredYesCount, competition.alternateCount]);
+
+    useEffect(() => {
+        // Initialize scores for current role
+        const competitors = competition.competitors[state.currentRole] || [];
+        const initialScores: Score[] = competitors.map(competitor => ({
+            bibNumber: competitor.bibNumber.toString(),
+            competitorId: competitor.id,
+            rawScore: null,
+            rank: undefined,
+            hasTie: false,
+            status: undefined,
+            tiedWith: []
+        }));
+
+        // Load any existing scores from the database
+        const loadExistingScores = async () => {
+            const sheetId = `${competition.id}_${judge.id}_${state.currentRole.toLowerCase()}`;
+            const existingSheet = await db.getJudgingSheet(sheetId);
+            
+            if (existingSheet) {
+                setState(prev => ({ 
+                    ...prev, 
+                    scores: existingSheet.scores,
+                    submitted: existingSheet.submitted,
+                    sortedScores: calculateRanksAndTies(existingSheet.scores)
+                }));
+            } else {
+                setState(prev => ({ ...prev, scores: initialScores, sortedScores: null }));
+            }
+        };
+
+        loadExistingScores();
+    }, [competition, state.currentRole, judge.id, calculateRanksAndTies]);
+
+    // Auto-save scores periodically
+    useEffect(() => {
+        const autoSaveScores = async () => {
+            const sheetId = `${competition.id}_${judge.id}_${state.currentRole.toLowerCase()}`;
+            const judgingSheet: JudgingSheetType = {
+                id: sheetId,
+                competitionId: competition.id,
+                judgeId: judge.id,
+                role: state.currentRole.toLowerCase() as 'leader' | 'follower',
+                scores: state.scores,
+                submitted: state.submitted,
+                lastUpdated: Date.now()
+            };
+
+            try {
+                await db.saveJudgingSheet(judgingSheet);
+            } catch (error) {
+                console.error('Error auto-saving scores:', error);
+            }
+        };
+
+        // Save whenever scores change, but debounce to avoid too frequent saves
+        const timeoutId = setTimeout(autoSaveScores, 2000);
+        return () => clearTimeout(timeoutId);
+    }, [state.scores, competition.id, judge.id, state.currentRole, state.submitted]);
 
     const debouncedCalculateRanks = useCallback((latestScores: Score[]) => {
         setTimeout(() => {
@@ -282,7 +326,8 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
             judgeId: judge.id,
             role: state.currentRole.toLowerCase() as 'leader' | 'follower',
             scores: state.scores,
-            submitted: true
+            submitted: true,
+            lastUpdated: Date.now()
         };
 
         try {

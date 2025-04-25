@@ -60,6 +60,11 @@ class DatabaseService {
 
     async getJudgingSheet(competitionId: string, judgeId: string, role: string): Promise<JudgingSheet | null> {
         try {
+            if (!role) {
+                console.error('Role is required for getJudgingSheet');
+                return null;
+            }
+
             const q = query(
                 this.judgingSheetsCollection,
                 where('competitionId', '==', competitionId),
@@ -80,6 +85,11 @@ class DatabaseService {
 
     async getJudgingSheets(competitionId: string, role: string): Promise<JudgingSheet[]> {
         try {
+            if (!role) {
+                console.error('Role is required for getJudgingSheets');
+                return [];
+            }
+
             const q = query(
                 this.judgingSheetsCollection,
                 where('competitionId', '==', competitionId),
@@ -98,11 +108,26 @@ class DatabaseService {
             const { id, ...sheetData } = judgingSheet;
             const now = Timestamp.now();
             
+            if (!sheetData.role) {
+                throw new Error('Role is required for judging sheet');
+            }
+
+            // Clean up the scores to remove any undefined values
+            const cleanScores = sheetData.scores.map(score => ({
+                bibNumber: score.bibNumber,
+                competitorId: score.competitorId,
+                rawScore: score.rawScore,
+                rank: score.rank ?? null,
+                hasTie: score.hasTie,
+                status: score.status ?? null,
+                tiedWith: score.tiedWith
+            }));
+
             await setDoc(doc(this.judgingSheetsCollection, id), {
                 ...sheetData,
+                scores: cleanScores,
                 role: sheetData.role.toLowerCase(),
-                updatedAt: now,
-                createdAt: sheetData.createdAt || now
+                updatedAt: now
             });
         } catch (error) {
             console.error('Error saving judging sheet:', error);

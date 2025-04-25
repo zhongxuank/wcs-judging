@@ -42,11 +42,19 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
 
     useEffect(() => {
         loadJudgingSheets();
-    }, [competition.id]);
+    }, [competition.id, currentRole]);
 
     const loadJudgingSheets = async () => {
         try {
-            const sheets = await db.getJudgingSheets(competition.id);
+            if (!currentRole) {
+                console.error('No current role set');
+                setLoading(false);
+                return;
+            }
+
+            console.log('Loading judging sheets for role:', currentRole);
+            const sheets = await db.getJudgingSheets(competition.id, currentRole);
+            console.log('Loaded judging sheets:', sheets);
             setJudgingSheets(sheets); // Show all sheets, not just submitted ones
             setLoading(false);
         } catch (error) {
@@ -81,9 +89,21 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
     };
 
     const getCompetitorResults = (role: CompetitorRole): CompetitorResults[] => {
+        if (!role) {
+            console.error('Role is required for getting competitor results');
+            return [];
+        }
+
+        console.log('Getting competitor results for role:', role);
+        console.log('Competition competitors:', competition.competitors);
+        console.log('Current judging sheets:', judgingSheets);
+        
         // Get chief judge and regular judges who have submitted scores
         const chiefJudge = competition.judges.find(j => j.isChiefJudge);
         const regularJudges = competition.judges.filter(j => !j.isChiefJudge);
+        
+        console.log('Chief judge:', chiefJudge);
+        console.log('Regular judges:', regularJudges);
         
         // Initialize competitor results
         const competitorResults: { [competitorId: string]: CompetitorResults } = {};
@@ -97,15 +117,18 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
             };
         });
 
+        console.log('Initial competitor results:', competitorResults);
+
         // Fill in chief judge ranks
         if (chiefJudge) {
             const chiefJudgeSheet = judgingSheets.find(
-                sheet => sheet.judgeId === chiefJudge.id && sheet.role === role
+                sheet => sheet.judgeId === chiefJudge.id && sheet.role === role.toLowerCase()
             );
+            console.log('Chief judge sheet:', chiefJudgeSheet);
             if (chiefJudgeSheet) {
                 chiefJudgeSheet.scores.forEach(score => {
                     if (competitorResults[score.competitorId]) {
-                        competitorResults[score.competitorId].chiefJudgeRank = score.rank;
+                        competitorResults[score.competitorId].chiefJudgeRank = score.rank ?? null;
                     }
                 });
             }
@@ -114,8 +137,9 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
         // Fill in regular judge scores
         regularJudges.forEach(judge => {
             const judgeSheet = judgingSheets.find(
-                sheet => sheet.judgeId === judge.id && sheet.role === role
+                sheet => sheet.judgeId === judge.id && sheet.role === role.toLowerCase()
             );
+            console.log(`Judge ${judge.name} sheet:`, judgeSheet);
             
             if (judgeSheet) {
                 judgeSheet.scores.forEach(score => {
@@ -135,8 +159,9 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
             }
         });
 
-        // Convert to array and sort by bib number
-        return Object.values(competitorResults).sort((a, b) => a.bibNumber - b.bibNumber);
+        const results = Object.values(competitorResults).sort((a, b) => a.bibNumber - b.bibNumber);
+        console.log('Final competitor results:', results);
+        return results;
     };
 
     const handleRoleChange = (_: React.SyntheticEvent, newRole: CompetitorRole) => {
@@ -147,7 +172,7 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
     const getActiveJudges = (): Judge[] => {
         const activeJudgeIds = new Set(
             judgingSheets
-                .filter(sheet => sheet.role === currentRole)
+                .filter(sheet => sheet.role === currentRole.toLowerCase())
                 .map(sheet => sheet.judgeId)
         );
         return competition.judges
@@ -192,11 +217,12 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
                 {competition.name} - Results
             </Typography>
 
-            <Tabs value={currentRole} onChange={handleRoleChange} sx={{ mb: 3 }}>
-                {['Leader', 'Follower'].map(role => (
-                    <Tab key={role} label={`${role}s`} value={role} />
-                ))}
-            </Tabs>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+                <Tabs value={currentRole} onChange={handleRoleChange}>
+                    <Tab label="Leaders" value="Leader" />
+                    <Tab label="Followers" value="Follower" />
+                </Tabs>
+            </Box>
 
             <Box sx={{ mb: 2 }}>
                 <Typography variant="subtitle1" gutterBottom>
@@ -223,7 +249,10 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
                                     <Box>
                                         {judge.name}
                                         <Typography variant="caption" display="block">
-                                            {judgingSheets.find(s => s.judgeId === judge.id && s.role === currentRole)?.submitted 
+                                            {judgingSheets.find(s => 
+                                                s.judgeId === judge.id && 
+                                                s.role === (currentRole.toLowerCase() as 'leader' | 'follower')
+                                            )?.submitted 
                                                 ? 'Submitted'
                                                 : 'In Progress'}
                                         </Typography>

@@ -62,6 +62,14 @@ const updateScoreDetails = (score: Score, rank?: number, hasTie?: boolean, statu
 });
 
 const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmit }) => {
+    console.log('Judge roles:', judge.roles);
+    
+    // Ensure we have at least one role
+    if (!judge.roles || judge.roles.length === 0) {
+        console.error('Judge has no roles assigned:', judge);
+        throw new Error('Judge must have at least one role assigned');
+    }
+
     const [state, setState] = useState<JudgingState>({
         scores: [],
         sortedScores: null,
@@ -155,6 +163,11 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
 
     useEffect(() => {
         // Initialize scores for current role
+        if (!state.currentRole) {
+            console.error('No current role set');
+            return;
+        }
+
         const competitors = competition.competitors[state.currentRole] || [];
         const initialScores: Score[] = competitors.map(competitor => ({
             bibNumber: competitor.bibNumber.toString(),
@@ -168,17 +181,25 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
 
         // Load any existing scores from the database
         const loadExistingScores = async () => {
-            const sheetId = `${competition.id}_${judge.id}_${state.currentRole.toLowerCase()}`;
-            const existingSheet = await db.getJudgingSheet(sheetId);
-            
-            if (existingSheet) {
-                setState(prev => ({ 
-                    ...prev, 
-                    scores: existingSheet.scores,
-                    submitted: existingSheet.submitted,
-                    sortedScores: calculateRanksAndTies(existingSheet.scores)
-                }));
-            } else {
+            try {
+                const existingSheet = await db.getJudgingSheet(
+                    competition.id,
+                    judge.id,
+                    state.currentRole
+                );
+                
+                if (existingSheet) {
+                    setState(prev => ({ 
+                        ...prev, 
+                        scores: existingSheet.scores,
+                        submitted: existingSheet.submitted,
+                        sortedScores: calculateRanksAndTies(existingSheet.scores)
+                    }));
+                } else {
+                    setState(prev => ({ ...prev, scores: initialScores, sortedScores: null }));
+                }
+            } catch (error) {
+                console.error('Error loading existing scores:', error);
                 setState(prev => ({ ...prev, scores: initialScores, sortedScores: null }));
             }
         };
@@ -188,14 +209,30 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
 
     // Auto-save scores periodically
     useEffect(() => {
+        if (!state.currentRole) {
+            console.error('No current role set for auto-save');
+            return;
+        }
+
         const autoSaveScores = async () => {
+            // Clean up scores to ensure no undefined values
+            const cleanScores = state.scores.map(score => ({
+                bibNumber: score.bibNumber,
+                competitorId: score.competitorId,
+                rawScore: score.rawScore,
+                rank: score.rank === undefined ? undefined : score.rank,  // Keep undefined if it's undefined
+                hasTie: score.hasTie || false,
+                status: score.status === undefined ? undefined : score.status,  // Keep undefined if it's undefined
+                tiedWith: score.tiedWith || []
+            }));
+
             const sheetId = `${competition.id}_${judge.id}_${state.currentRole.toLowerCase()}`;
             const judgingSheet: JudgingSheetType = {
                 id: sheetId,
                 competitionId: competition.id,
                 judgeId: judge.id,
                 role: state.currentRole.toLowerCase() as 'leader' | 'follower',
-                scores: state.scores,
+                scores: cleanScores,
                 submitted: state.submitted,
                 lastUpdated: Date.now()
             };

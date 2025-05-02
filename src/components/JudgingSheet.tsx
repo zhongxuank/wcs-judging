@@ -609,19 +609,31 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
             return score;
         };
 
-        // Tap/click handler (increments of 10)
+        // Tap/click handler (increments of 10, only if not yet scored)
         const handleTap = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
             if (dragging) return;
+            if (score.rawScore !== null) return; // Only allow tap-to-score if not scored yet
             let clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
             const newScore = getScoreFromX(clientX, 10);
             setDragScore(null);
             onScoreChange(competitor.id, newScore);
         };
 
-        // Drag handlers (increments of 1)
+        // Drag handlers (increments of 1, only if tap is near score indicator for already-scored)
+        const getScoreIndicatorX = () => {
+            if (!cardRef.current) return 0;
+            const rect = cardRef.current.getBoundingClientRect();
+            const percent = (score.rawScore ?? 0) / 100;
+            return rect.left + percent * rect.width;
+        };
         const handleDragStart = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
-            setDragging(true);
             let clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+            if (score.rawScore !== null) {
+                // Only allow drag if tap is within 20px of score indicator
+                const indicatorX = getScoreIndicatorX();
+                if (Math.abs(clientX - indicatorX) > 20) return;
+            }
+            setDragging(true);
             setDragScore(getScoreFromX(clientX, 1));
             e.preventDefault();
         };
@@ -654,7 +666,8 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
         // Bar color: only update on drag end (not live)
         const barColor = dragging ? 'rgba(0,0,0,0.15)' : statusColor;
         const barWidth = ((dragging && dragScore !== null ? dragScore : score.rawScore) || 0) + '%';
-
+        // Chief judge: show role-level ranking
+        const showRank = judge.isChiefJudge && score.rank !== undefined && score.rank !== null;
         return (
             <Card
                 ref={cardRef}
@@ -666,6 +679,8 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                     overflow: 'hidden',
                     touchAction: 'pan-y',
                     userSelect: 'none',
+                    width: '92%',
+                    mx: 'auto',
                 }}
                 onClick={handleTap}
                 onTouchStart={handleDragStart}
@@ -693,10 +708,15 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                         <Typography variant="h5" sx={{ fontWeight: 'bold' }}>#{competitor.bibNumber}</Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ opacity: 0.7 }}>{competitor.name}</Typography>
                     </Box>
-                    <Box sx={{ minWidth: 80, textAlign: 'center' }}>
+                    <Box sx={{ minWidth: 80, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                         <Typography variant="h3" sx={{ fontWeight: 'bold', color: dragging ? 'primary.main' : (score.status === 'NO' ? 'white' : 'text.primary') }}>
                             {displayScore}
                         </Typography>
+                        {showRank && (
+                            <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 600 }}>
+                                #{score.rank}
+                            </Typography>
+                        )}
                     </Box>
                 </CardContent>
             </Card>

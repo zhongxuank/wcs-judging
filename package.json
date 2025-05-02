@@ -38,5 +38,6 @@
     "gh-pages": "^6.3.0",
     "typescript": "^5.2.2",
     "vite": "^5.1.0"
-  }
+  },
+  "homepage": "https://zhongxuank.github.io/wcs-judging/"
 }

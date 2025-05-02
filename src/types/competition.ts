@@ -15,6 +15,8 @@ export interface Competitor {
     name: string;
     role: CompetitorRole;
     bibNumber: number;
+    isRepeat?: boolean;
+    originalHeat?: number;
 }
 
 export interface Judge {
@@ -23,6 +25,13 @@ export interface Judge {
     roles: CompetitorRole[];
     status: JudgeStatus;
     isChiefJudge: boolean;
+}
+
+export interface Heat {
+    number: number;
+    competitors: {
+        [key in CompetitorRole]: Competitor[];
+    };
 }
 
 export interface Competition {
@@ -35,6 +44,7 @@ export interface Competition {
     competitors: {
         [key in CompetitorRole]: Competitor[];
     };
+    heats: Heat[];
     requiredYesCount: number;
     advancingCount: number;
     alternateCount: number;

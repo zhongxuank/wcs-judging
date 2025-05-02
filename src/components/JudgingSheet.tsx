@@ -26,10 +26,11 @@ import {
     IconButton,
     TextField,
 } from '@mui/material';
-import { Competition, Judge, CompetitorRole, JudgeStatus, JudgingSheet as CompetitionJudgingSheet, Score } from '../types/competition';
+import { Competition, Judge, CompetitorRole, JudgeStatus, JudgingSheet as CompetitionJudgingSheet, Score, Competitor } from '../types/competition';
 import { db } from '../services/db';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
+import { useNavigate } from 'react-router-dom';
 
 type JudgingSheetType = CompetitionJudgingSheet;
 
@@ -52,6 +53,18 @@ interface TieInfo {
     affectedPositions: string[];
 }
 
+interface CompetitorsByHeat {
+    [key: number]: {
+        [key in CompetitorRole]: Array<{
+            id: string;
+            name: string;
+            bibNumber: number;
+            isRepeat?: boolean;
+            originalHeat?: number;
+        }>;
+    };
+}
+
 // Helper function to create a new score object with updated rank/tie info
 const updateScoreDetails = (score: Score, rank?: number, hasTie?: boolean, status?: 'YES' | 'ALT' | 'NO', tiedWith?: string[]): Score => ({
     ...score,
@@ -62,6 +75,7 @@ const updateScoreDetails = (score: Score, rank?: number, hasTie?: boolean, statu
 });
 
 const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmit }) => {
+    const navigate = useNavigate();
     console.log('Judge roles:', judge.roles);
     
     // Ensure we have at least one role
@@ -370,6 +384,7 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
         try {
             await db.saveJudgingSheet(judgingSheet);
             onSubmit();
+            navigate('/'); // Navigate to home page after successful submission
         } catch (error) {
             console.error('Error saving judging sheet:', error);
             setError('Failed to save scores. Please try again.');
@@ -454,6 +469,306 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
         }
     };
 
+    // Add this function to create an empty score
+    const createEmptyScore = (competitorId: string, bibNumber: number): Score => ({
+        competitorId,
+        bibNumber: bibNumber.toString(),
+        rawScore: null,
+        rank: undefined,
+        hasTie: false,
+        tiedWith: []
+    });
+
+    // Add this function to organize competitors by heat
+    const organizeCompetitorsByHeat = useCallback(() => {
+        const competitorsByHeat: CompetitorsByHeat = {};
+        
+        // Get heats data from competition
+        const heats = competition.heats || [];
+        
+        heats.forEach((heat) => {
+            competitorsByHeat[heat.number] = {
+                Leader: heat.competitors.Leader.filter((c: Competitor) => !c.isRepeat),
+                Follower: heat.competitors.Follower.filter((c: Competitor) => !c.isRepeat)
+            };
+        });
+        
+        return competitorsByHeat;
+    }, [competition]);
+
+    // Modify the display logic based on whether it's a chief judge
+    const renderCompetitorList = () => {
+        const competitorsByHeat = organizeCompetitorsByHeat();
+        
+        if (judge.isChiefJudge || judge.roles.length > 1) {
+            // Combined view for chief judge or judges that can judge both roles
+            return (
+                <Box>
+                    {Object.entries(competitorsByHeat).map(([heatNumber, heatData]) => (
+                        <Paper key={heatNumber} sx={{ mb: 3, p: 2 }}>
+                            <Typography variant="h6" gutterBottom sx={{ borderBottom: 1, borderColor: 'divider', pb: 1 }}>
+                                Heat {heatNumber}
+                            </Typography>
+                            
+                            {/* Leaders Section */}
+                            <Box sx={{ mb: 2 }}>
+                                <Typography variant="subtitle1" color="primary" gutterBottom>
+                                    Leaders
+                                </Typography>
+                                <TableContainer>
+                                    <Table size="small">
+                                        <TableBody>
+                                            {heatData.Leader.map((competitor: Competitor) => {
+                                                const score = state.scores.find(s => s.competitorId === competitor.id) || 
+                                                            createEmptyScore(competitor.id, competitor.bibNumber);
+                                                return (
+                                                    <TableRow 
+                                                        key={competitor.id}
+                                                        sx={{
+                                                            backgroundColor: score.hasTie ? 'warning.light' : 'inherit'
+                                                        }}
+                                                    >
+                                                        <TableCell sx={{ width: '20%' }}>
+                                                            <Typography>#{competitor.bibNumber}</Typography>
+                                                            <Typography variant="caption" color="text.secondary">
+                                                                {competitor.name}
+                                                            </Typography>
+                                                        </TableCell>
+                                                        <TableCell sx={{ width: '60%' }}>
+                                                            <Grid container spacing={2} alignItems="center">
+                                                                <Grid item xs={12}>
+                                                                    {renderScoreInput(score, competitor.id)}
+                                                                </Grid>
+                                                            </Grid>
+                                                        </TableCell>
+                                                        <TableCell sx={{ width: '20%' }}>
+                                                            {renderScoreStatus(score)}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                );
+                                            })}
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
+                            </Box>
+
+                            {/* Followers Section */}
+                            <Box>
+                                <Typography variant="subtitle1" color="primary" gutterBottom>
+                                    Followers
+                                </Typography>
+                                <TableContainer>
+                                    <Table size="small">
+                                        <TableBody>
+                                            {heatData.Follower.map((competitor: Competitor) => {
+                                                const score = state.scores.find(s => s.competitorId === competitor.id) || 
+                                                            createEmptyScore(competitor.id, competitor.bibNumber);
+                                                return (
+                                                    <TableRow 
+                                                        key={competitor.id}
+                                                        sx={{
+                                                            backgroundColor: score.hasTie ? 'warning.light' : 'inherit'
+                                                        }}
+                                                    >
+                                                        <TableCell sx={{ width: '20%' }}>
+                                                            <Typography>#{competitor.bibNumber}</Typography>
+                                                            <Typography variant="caption" color="text.secondary">
+                                                                {competitor.name}
+                                                            </Typography>
+                                                        </TableCell>
+                                                        <TableCell sx={{ width: '60%' }}>
+                                                            <Grid container spacing={2} alignItems="center">
+                                                                <Grid item xs={12}>
+                                                                    {renderScoreInput(score, competitor.id)}
+                                                                </Grid>
+                                                            </Grid>
+                                                        </TableCell>
+                                                        <TableCell sx={{ width: '20%' }}>
+                                                            {renderScoreStatus(score)}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                );
+                                            })}
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
+                            </Box>
+                        </Paper>
+                    ))}
+                </Box>
+            );
+        } else {
+            // Single role view for regular judges
+            return (
+                <Box>
+                    {Object.entries(competitorsByHeat).map(([heatNumber, heatData]) => (
+                        <Paper key={heatNumber} sx={{ mb: 3, p: 2 }}>
+                            <Typography variant="h6" gutterBottom sx={{ borderBottom: 1, borderColor: 'divider', pb: 1 }}>
+                                Heat {heatNumber}
+                            </Typography>
+                            <TableContainer>
+                                <Table size="small">
+                                    <TableBody>
+                                        {heatData[state.currentRole].map((competitor: Competitor) => {
+                                            const score = state.scores.find(s => s.competitorId === competitor.id) || 
+                                                        createEmptyScore(competitor.id, competitor.bibNumber);
+                                            return (
+                                                <TableRow 
+                                                    key={competitor.id}
+                                                    sx={{
+                                                        backgroundColor: score.hasTie ? 'warning.light' : 'inherit'
+                                                    }}
+                                                >
+                                                    <TableCell sx={{ width: '20%' }}>
+                                                        <Typography>#{competitor.bibNumber}</Typography>
+                                                        <Typography variant="caption" color="text.secondary">
+                                                            {competitor.name}
+                                                        </Typography>
+                                                    </TableCell>
+                                                    <TableCell sx={{ width: '60%' }}>
+                                                        <Grid container spacing={2} alignItems="center">
+                                                            <Grid item xs={12}>
+                                                                {renderScoreInput(score, competitor.id)}
+                                                            </Grid>
+                                                        </Grid>
+                                                    </TableCell>
+                                                    <TableCell sx={{ width: '20%' }}>
+                                                        {renderScoreStatus(score)}
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        </Paper>
+                    ))}
+                </Box>
+            );
+        }
+    };
+
+    // Helper function to render score input (reuse your existing score input logic)
+    const renderScoreInput = (score: Score, competitorId: string) => {
+        if (score.rawScore === null) {
+            return (
+                <Box 
+                    sx={{ 
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        height: '60px',
+                        bgcolor: 'action.hover',
+                        borderRadius: 1,
+                        cursor: 'pointer',
+                        touchAction: 'pan-y'
+                    }}
+                    onTouchStart={(e) => handleTouchStart(e, competitorId, null)}
+                    onTouchMove={(e) => handleTouchMove(e, competitorId)}
+                    onTouchEnd={handleTouchEnd}
+                >
+                    <Typography color="text.secondary">
+                        Slide to start scoring
+                    </Typography>
+                </Box>
+            );
+        }
+
+        return (
+            <Box
+                sx={{ 
+                    position: 'relative',
+                    cursor: 'pointer',
+                    touchAction: 'pan-y'
+                }}
+                onTouchStart={(e) => handleTouchStart(e, competitorId, score.rawScore)}
+                onTouchMove={(e) => handleTouchMove(e, competitorId)}
+                onTouchEnd={handleTouchEnd}
+            >
+                <Grid container spacing={1} alignItems="center">
+                    <Grid item>
+                        <IconButton
+                            size="small"
+                            onClick={() => handleScoreChange(competitorId, Math.max(0, (score.rawScore || 0) - 1))}
+                        >
+                            <RemoveIcon />
+                        </IconButton>
+                    </Grid>
+                    <Grid item xs>
+                        <TextField
+                            fullWidth
+                            value={score.rawScore || ''}
+                            onChange={(e) => handleDirectInput(competitorId, e.target.value)}
+                            variant="outlined"
+                            size="small"
+                            type="number"
+                            InputProps={{
+                                inputProps: { min: 0, max: 100 }
+                            }}
+                        />
+                        <Box 
+                            sx={{ 
+                                mt: 1,
+                                height: 4,
+                                width: '100%',
+                                bgcolor: 'grey.300',
+                                borderRadius: 1,
+                                overflow: 'hidden'
+                            }}
+                        >
+                            <Box
+                                sx={{
+                                    width: `${score.rawScore || 0}%`,
+                                    height: '100%',
+                                    bgcolor: 'primary.main',
+                                    transition: 'width 0.3s ease'
+                                }}
+                            />
+                        </Box>
+                    </Grid>
+                    <Grid item>
+                        <IconButton
+                            size="small"
+                            onClick={() => handleScoreChange(competitorId, Math.min(100, (score.rawScore || 0) + 1))}
+                        >
+                            <AddIcon />
+                        </IconButton>
+                    </Grid>
+                </Grid>
+            </Box>
+        );
+    };
+
+    // Helper function to render score status (reuse your existing status display logic)
+    const renderScoreStatus = (score: Score) => {
+        if (score.rawScore === null) return null;
+
+        return (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                {judge.isChiefJudge ? (
+                    <Typography>Rank: {score.rank || '-'}</Typography>
+                ) : (
+                    <>
+                        {(score.rank || Infinity) <= competition.requiredYesCount && (
+                            <Chip size="small" label="YES" color="success" />
+                        )}
+                        {(score.rank || Infinity) > competition.requiredYesCount && 
+                         (score.rank || Infinity) <= (competition.requiredYesCount + competition.alternateCount) && (
+                            <Chip 
+                                size="small" 
+                                label={`ALT${(score.rank || 0) - competition.requiredYesCount}`} 
+                                color="info" 
+                            />
+                        )}
+                        {(score.rank || Infinity) > (competition.requiredYesCount + competition.alternateCount) && (
+                            <Chip size="small" label="NO" color="error" />
+                        )}
+                    </>
+                )}
+            </Box>
+        );
+    };
+
     return (
         <Box sx={{ maxWidth: 800, mx: 'auto', mt: 4, p: 2 }}>
             <Typography variant="h4" gutterBottom>
@@ -463,7 +778,8 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                 {judge.name} - {judge.isChiefJudge ? 'Chief Judge' : 'Judge'}
             </Typography>
 
-            {judge.roles.length > 1 && (
+            {/* Only show role tabs for regular judges with multiple roles */}
+            {!judge.isChiefJudge && judge.roles.length > 1 && (
                 <Tabs
                     value={state.currentRole}
                     onChange={handleRoleChange}
@@ -509,239 +825,39 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
                 )}
             </Paper>
 
-            <TableContainer component={Paper}>
-                <Table>
-                    <TableHead>
-                        <TableRow>
-                            <TableCell>Bib #</TableCell>
-                            <TableCell>Score</TableCell>
-                            <TableCell>Status {judge.isChiefJudge && '& Rank'}</TableCell>
-                        </TableRow>
-                    </TableHead>
-                    <TableBody>
-                        {displayScores.map((score) => {
-                            const competitor = competition.competitors[state.currentRole].find(
-                                c => c.id === score.competitorId
-                            );
-                            if (!competitor) return null;
+            {renderCompetitorList()}
 
-                            return (
-                                <TableRow 
-                                    key={score.competitorId}
-                                    sx={{
-                                        backgroundColor: score.hasTie ? 'warning.light' : 'inherit',
-                                        transition: 'background-color 0.2s',
-                                        position: 'relative', 
-                                    }}
-                                >
-                                    <TableCell>
-                                        <Box>
-                                            <Typography>#{competitor.bibNumber}</Typography>
-                                            <Typography 
-                                                variant="caption" 
-                                                color="text.secondary"
-                                                sx={{ display: 'block' }}
-                                            >
-                                                {competitor.name}
-                                            </Typography>
-                                        </Box>
-                                    </TableCell>
-                                    <TableCell sx={{ width: '50%', position: 'relative', cursor: 'pointer', touchAction: 'pan-y' }}
-                                        onTouchStart={(e) => handleTouchStart(e, score.competitorId, score.rawScore)}
-                                        onTouchMove={(e) => handleTouchMove(e, score.competitorId)}
-                                        onTouchEnd={handleTouchEnd}
-                                    >
-                                        <Grid container spacing={2} alignItems="center">
-                                            <Grid item xs={12}>
-                                                {score.rawScore === null ? (
-                                                    <Box 
-                                                        sx={{ 
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center',
-                                                            height: '60px',
-                                                            bgcolor: 'action.hover',
-                                                            borderRadius: 1,
-                                                            cursor: 'pointer',
-                                                            touchAction: 'pan-y'
-                                                        }}
-                                                    >
-                                                        <Typography color="text.secondary">
-                                                            Slide to start scoring
-                                                        </Typography>
-                                                    </Box>
-                                                ) : (
-                                                    <Box
-                                                        sx={{
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            gap: 1,
-                                                            position: 'relative',
-                                                        }}
-                                                    >
-                                                        <IconButton 
-                                                            onClick={() => handleScoreAdjust(score.competitorId, score.rawScore, -0.1)}
-                                                            sx={{ p: 1 }}
-                                                            disabled={score.rawScore === null || score.rawScore <= 0}
-                                                        >
-                                                            <RemoveIcon />
-                                                        </IconButton>
-                                                        
-                                                        <Box
-                                                            sx={{
-                                                                flex: 1,
-                                                                height: '4px',
-                                                                bgcolor: 'action.hover',
-                                                                borderRadius: '2px',
-                                                                position: 'relative'
-                                                            }}
-                                                        >
-                                                            <Box
-                                                                sx={{
-                                                                    position: 'absolute',
-                                                                    left: 0,
-                                                                    width: `${score.rawScore}%`,
-                                                                    height: '100%',
-                                                                    bgcolor: getScoreColor(score) || 'primary.main',
-                                                                    borderRadius: '2px'
-                                                                }}
-                                                            />
-                                                        </Box>
-                                                        
-                                                        <Typography
-                                                            sx={{
-                                                                minWidth: '3em',
-                                                                textAlign: 'center',
-                                                                fontWeight: 'bold'
-                                                            }}
-                                                        >
-                                                            {score.rawScore !== null ? score.rawScore.toFixed(1) : '-'}
-                                                        </Typography>
-                                                        
-                                                        <IconButton 
-                                                            onClick={() => handleScoreAdjust(score.competitorId, score.rawScore, 0.1)}
-                                                            sx={{ p: 1 }}
-                                                            disabled={score.rawScore === null || score.rawScore >= 100}
-                                                        >
-                                                            <AddIcon />
-                                                        </IconButton>
-                                                    </Box>
-                                                )}
-                                            </Grid>
-                                        </Grid>
-                                        {/* Visual Score Bar */}                                    
-                                        {score.rawScore !== null && (
-                                            <Box
-                                                sx={{
-                                                    position: 'absolute',
-                                                    bottom: 0,
-                                                    left: '5%', // Align with the central scoring area roughly
-                                                    right: '5%',
-                                                    height: '4px',
-                                                    bgcolor: 'action.disabledBackground',
-                                                    borderRadius: '2px',
-                                                    overflow: 'hidden',
-                                                }}
-                                            >
-                                                <Box
-                                                    sx={{
-                                                        height: '100%',
-                                                        width: `${score.rawScore}%`,
-                                                        bgcolor: getScoreColor(score) || 'primary.main',
-                                                        borderRadius: '2px',
-                                                        transition: 'width 0.1s ease-out',
-                                                    }}
-                                                />
-                                            </Box>
-                                        )}
-                                    </TableCell>
-                                    <TableCell>
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'space-between' }}>
-                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                                {score.rawScore !== null && (
-                                                    <>
-                                                        {(score.rank || Infinity) <= competition.requiredYesCount && (
-                                                            <Chip size="small" label="YES" color="success" />
-                                                        )}
-                                                        {(score.rank || Infinity) > competition.requiredYesCount && 
-                                                         (score.rank || Infinity) <= (competition.requiredYesCount + competition.alternateCount) && (
-                                                            <Chip 
-                                                                size="small" 
-                                                                label={`ALT${(score.rank || 0) - competition.requiredYesCount}`} 
-                                                                color="info" 
-                                                            />
-                                                        )}
-                                                        {(score.rank || Infinity) > (competition.requiredYesCount + competition.alternateCount) && (
-                                                            <Chip size="small" label="NO" color="error" />
-                                                        )}
-                                                    </>
-                                                )}
-                                            </Box>
-                                            {judge.isChiefJudge && score.rawScore !== null && (
-                                                <Typography 
-                                                    variant="body2" 
-                                                    sx={{ 
-                                                        fontWeight: 'bold',
-                                                        minWidth: '2em',
-                                                        textAlign: 'right'
-                                                    }}
-                                                >
-                                                    #{score.rank || '-'}
-                                                </Typography>
-                                            )}
-                                        </Box>
-                                    </TableCell>
-                                </TableRow>
-                            );
-                        })}
-                    </TableBody>
-                </Table>
-            </TableContainer>
+            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                    variant="contained"
+                    onClick={handleSubmit}
+                    disabled={!canSubmit()}
+                >
+                    Submit Scores
+                </Button>
+            </Box>
+
+            <Dialog
+                open={confirmDialogOpen}
+                onClose={() => setConfirmDialogOpen(false)}
+            >
+                <DialogTitle>Confirm Score Submission</DialogTitle>
+                <DialogContent>
+                    Are you sure you want to submit your scores? This action cannot be undone.
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setConfirmDialogOpen(false)}>Cancel</Button>
+                    <Button onClick={handleConfirmSubmit} variant="contained">
+                        Submit
+                    </Button>
+                </DialogActions>
+            </Dialog>
 
             {error && (
                 <Alert severity="error" sx={{ mt: 2 }}>
                     {error}
                 </Alert>
             )}
-
-            <Box sx={{ mt: 3 }}>
-                {!canSubmit() && (
-                    <Alert severity="info" sx={{ mb: 2 }}>
-                        {judge.isChiefJudge 
-                            ? 'Please score all competitors in all roles before submitting.'
-                            : 'Please score all competitors before submitting.'}
-                    </Alert>
-                )}
-                {state.scores.length > 0 && state.scores.length < competition.competitors[state.currentRole].length && (
-                    <Alert severity="warning" sx={{ mb: 2 }}>
-                        {state.scores.length === 1 ? 'There is a competitor missing' : 'There are competitors missing'}
-                    </Alert>
-                )}
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button
-                        variant="contained"
-                        onClick={() => setConfirmDialogOpen(true)}
-                        disabled={state.submitted || !canSubmit()}
-                    >
-                        Submit Scores
-                    </Button>
-                </Box>
-            </Box>
-
-            <Dialog open={confirmDialogOpen} onClose={() => setConfirmDialogOpen(false)}>
-                <DialogTitle>Confirm Score Submission</DialogTitle>
-                <DialogContent>
-                    <Typography>
-                        Are you sure you want to submit your scores? This action cannot be undone.
-                    </Typography>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setConfirmDialogOpen(false)}>Cancel</Button>
-                    <Button onClick={handleConfirmSubmit} variant="contained" color="primary">
-                        Submit
-                    </Button>
-                </DialogActions>
-            </Dialog>
         </Box>
     );
 };

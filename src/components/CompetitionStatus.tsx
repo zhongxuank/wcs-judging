@@ -16,6 +16,7 @@ import {
 import { Competition, CompetitorRole, Judge } from '../types/competition';
 import { JudgingSheet } from '../types/judging';
 import { db } from '../services/db';
+import { useNavigate } from 'react-router-dom';
 
 interface CompetitionStatusProps {
     competition: Competition;
@@ -39,6 +40,7 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
     const [currentRole, setCurrentRole] = useState<CompetitorRole>('Leader');
     const [judgingSheets, setJudgingSheets] = useState<JudgingSheet[]>([]);
     const [loading, setLoading] = useState(true);
+    const navigate = useNavigate();
 
     useEffect(() => {
         loadJudgingSheets();
@@ -180,8 +182,7 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
     };
 
     const handleEditScores = (judgeId: string) => {
-        // Navigate to JudgingSheet component with the judge's existing scores
-        window.location.href = `#/competition/${competition.id}/judge/${judgeId}`;
+        navigate(`/competition/${competition.id}/judge/${judgeId}`);
     };
 
     const submittedJudges = getActiveJudges();
@@ -237,8 +238,17 @@ const CompetitionStatus: React.FC<CompetitionStatusProps> = ({ competition }) =>
                 </Box>
             </Box>
 
-            <TableContainer component={Paper}>
-                <Table>
+            <TableContainer 
+                component={Paper} 
+                sx={{ 
+                    mt: 2,
+                    overflow: 'auto',
+                    '& table': {
+                        minWidth: 800, // Ensures table is wide enough to scroll
+                    }
+                }}
+            >
+                <Table stickyHeader>
                     <TableHead>
                         <TableRow>
                             <TableCell>Bib #</TableCell>

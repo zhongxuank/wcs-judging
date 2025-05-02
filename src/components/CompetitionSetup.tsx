@@ -45,6 +45,7 @@ interface JudgeSetup {
 
 interface CompetitorWithStatus extends Competitor {
     isRepeat?: boolean;
+    originalHeat?: number;
 }
 
 interface HeatSetup {
@@ -80,7 +81,7 @@ const CompetitionSetup: React.FC<CompetitionSetupProps> = ({
             name: 'Chief Judge', 
             isChiefJudge: true,
             roles: ['Leader', 'Follower'],
-            scoringRoles: ['Leader', 'Follower']
+            scoringRoles: []
         }
     ]);
     const [error, setError] = useState<string | null>(null);
@@ -157,9 +158,9 @@ const CompetitionSetup: React.FC<CompetitionSetupProps> = ({
             return false;
         }
 
-        // Check scoring judges for each role
-        const scoringJudgesLeader = regularJudges.filter(j => j.scoringRoles.includes('Leader')).length;
-        const scoringJudgesFollower = regularJudges.filter(j => j.scoringRoles.includes('Follower')).length;
+        // Check scoring judges for each role (including chief judge if they score)
+        const scoringJudgesLeader = judges.filter(j => j.scoringRoles.includes('Leader')).length;
+        const scoringJudgesFollower = judges.filter(j => j.scoringRoles.includes('Follower')).length;
 
         if (scoringJudgesLeader === 0) {
             setError('At least one judge must score Leaders');
@@ -213,40 +214,78 @@ const CompetitionSetup: React.FC<CompetitionSetupProps> = ({
             });
         }
 
-        // Distribute competitors across heats by bib number
-        roles.forEach(role => {
-            // Sort competitors by bib number
-            const sortedCompetitors = [...competitors[role]].sort(
-                (a, b) => a.bibNumber - b.bibNumber
-            );
+        // First, determine the size needed for the final heat
+        const sortedByRole = {
+            Leader: [...competitors.Leader].sort((a, b) => a.bibNumber - b.bibNumber),
+            Follower: [...competitors.Follower].sort((a, b) => a.bibNumber - b.bibNumber),
+        };
 
+        const totalCompetitors = {
+            Leader: sortedByRole.Leader.length,
+            Follower: sortedByRole.Follower.length
+        };
+
+        // Calculate how many full heats we can make (all heats except the last one)
+        const fullHeatsCount = heatsCount - 1;
+        const totalInFullHeats = fullHeatsCount * competitorsPerHeat;
+
+        // Calculate remaining competitors for each role after filling full heats
+        const remainingAfterFullHeats = {
+            Leader: Math.max(0, totalCompetitors.Leader - totalInFullHeats),
+            Follower: Math.max(0, totalCompetitors.Follower - totalInFullHeats)
+        };
+
+        // Final heat size will be determined by the role with more remaining competitors
+        const finalHeatSize = Math.max(remainingAfterFullHeats.Leader, remainingAfterFullHeats.Follower);
+
+        // Distribute competitors across heats
+        roles.forEach(role => {
+            const sortedCompetitors = sortedByRole[role];
             let currentIndex = 0;
 
-            // Fill each heat to capacity
-            for (let heatIndex = 0; heatIndex < heatsCount; heatIndex++) {
+            // Fill full heats first
+            for (let heatIndex = 0; heatIndex < fullHeatsCount; heatIndex++) {
                 const heatCompetitors: CompetitorWithStatus[] = [];
-
-                // Fill this heat to capacity
+                
+                // Fill this heat to the standard capacity
                 for (let i = 0; i < competitorsPerHeat; i++) {
                     if (currentIndex < sortedCompetitors.length) {
-                        // Add original competitor
                         heatCompetitors.push({
                             ...sortedCompetitors[currentIndex],
                             isRepeat: false
                         });
                         currentIndex++;
-                    } else {
-                        // Need to reuse a competitor from the beginning
-                        const repeatIndex = (i - (sortedCompetitors.length - currentIndex)) % sortedCompetitors.length;
-                        heatCompetitors.push({
-                            ...sortedCompetitors[repeatIndex],
-                            isRepeat: true
-                        });
                     }
                 }
 
                 newHeats[heatIndex].competitors[role] = heatCompetitors;
             }
+
+            // Handle the final heat
+            const finalHeatCompetitors: CompetitorWithStatus[] = [];
+            
+            // Add remaining original competitors
+            while (currentIndex < sortedCompetitors.length) {
+                finalHeatCompetitors.push({
+                    ...sortedCompetitors[currentIndex],
+                    isRepeat: false
+                });
+                currentIndex++;
+            }
+
+            // If we need more competitors to match the final heat size
+            if (finalHeatCompetitors.length < finalHeatSize) {
+                const neededRepeats = finalHeatSize - finalHeatCompetitors.length;
+                for (let i = 0; i < neededRepeats; i++) {
+                    finalHeatCompetitors.push({
+                        ...sortedCompetitors[i],
+                        isRepeat: true,
+                        originalHeat: 1
+                    });
+                }
+            }
+
+            newHeats[fullHeatsCount].competitors[role] = finalHeatCompetitors;
         });
 
         setHeats(newHeats);
@@ -325,6 +364,7 @@ const CompetitionSetup: React.FC<CompetitionSetupProps> = ({
                 id: uuidv4(),
                 name: competitionName,
                 type: competitionType,
+                date: new Date().toISOString(),
                 status: CompetitionStatus.PENDING,
                 judges: judges.map(j => ({
                     id: j.id,
@@ -334,6 +374,7 @@ const CompetitionSetup: React.FC<CompetitionSetupProps> = ({
                     isChiefJudge: j.isChiefJudge
                 })),
                 competitors: competitors,
+                heats: heats,
                 requiredYesCount: requiredYesCount,
                 advancingCount: advancingCount,
                 alternateCount: alternateCount
@@ -703,6 +744,79 @@ const CompetitionSetup: React.FC<CompetitionSetupProps> = ({
         </Box>
     );
 
+    const renderHeatList = () => (
+        <Box sx={{ mt: 3 }}>
+            <Typography variant="h6" gutterBottom>
+                Heat Assignments
+            </Typography>
+            {heats.map((heat, index) => (
+                <Paper key={heat.number} sx={{ p: 2, mb: 2 }}>
+                    <Typography variant="h6" gutterBottom>
+                        Heat {heat.number}
+                    </Typography>
+                    <Grid container spacing={2}>
+                        <Grid item xs={6}>
+                            <Typography variant="subtitle1" gutterBottom>Leaders</Typography>
+                            {heat.competitors.Leader.map((competitor, idx) => (
+                                <Typography 
+                                    key={`${competitor.id}-${idx}`}
+                                    sx={{ 
+                                        color: competitor.isRepeat ? 'text.disabled' : 'text.primary',
+                                        display: 'flex',
+                                        alignItems: 'center'
+                                    }}
+                                >
+                                    #{competitor.bibNumber} - {competitor.name}
+                                    {competitor.isRepeat && (
+                                        <Typography 
+                                            component="span" 
+                                            sx={{ 
+                                                ml: 1, 
+                                                fontSize: '0.8em', 
+                                                color: 'text.secondary',
+                                                fontStyle: 'italic'
+                                            }}
+                                        >
+                                            (repeat from Heat {competitor.originalHeat})
+                                        </Typography>
+                                    )}
+                                </Typography>
+                            ))}
+                        </Grid>
+                        <Grid item xs={6}>
+                            <Typography variant="subtitle1" gutterBottom>Followers</Typography>
+                            {heat.competitors.Follower.map((competitor, idx) => (
+                                <Typography 
+                                    key={`${competitor.id}-${idx}`}
+                                    sx={{ 
+                                        color: competitor.isRepeat ? 'text.disabled' : 'text.primary',
+                                        display: 'flex',
+                                        alignItems: 'center'
+                                    }}
+                                >
+                                    #{competitor.bibNumber} - {competitor.name}
+                                    {competitor.isRepeat && (
+                                        <Typography 
+                                            component="span" 
+                                            sx={{ 
+                                                ml: 1, 
+                                                fontSize: '0.8em', 
+                                                color: 'text.secondary',
+                                                fontStyle: 'italic'
+                                            }}
+                                        >
+                                            (repeat from Heat {competitor.originalHeat})
+                                        </Typography>
+                                    )}
+                                </Typography>
+                            ))}
+                        </Grid>
+                    </Grid>
+                </Paper>
+            ))}
+        </Box>
+    );
+
     const renderReview = () => (
         <Box sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
@@ -728,6 +842,11 @@ const CompetitionSetup: React.FC<CompetitionSetupProps> = ({
                 {judges.map(judge => (
                     <li key={judge.id}>
                         {judge.name} - {judge.isChiefJudge ? 'Chief Judge' : 'Judge'}
+                        <Typography variant="body2" component="div" sx={{ ml: 2, color: 'text.secondary' }}>
+                            Can judge: {judge.roles.join(', ')}
+                            <br />
+                            Scores count for: {judge.scoringRoles.length > 0 ? judge.scoringRoles.join(', ') : 'None'}
+                        </Typography>
                     </li>
                 ))}
             </ul>
@@ -738,6 +857,8 @@ const CompetitionSetup: React.FC<CompetitionSetupProps> = ({
             <Typography variant="body2">
                 {competitors.Leader.length} Leaders, {competitors.Follower.length} Followers
             </Typography>
+
+            {heats.length > 0 && renderHeatList()}
 
             {error && (
                 <Alert 

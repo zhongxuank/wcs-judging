@@ -97,7 +97,8 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
     const [snackbarMessage, setSnackbarMessage] = useState('');
     const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
     const [touchScore, setTouchScore] = useState<number | null>(null);
-    const [isAdjusting, setIsAdjusting] = useState(false);
+    const [activeRow, setActiveRow] = useState<string | null>(null);
+    const [isScoring, setIsScoring] = useState(false);
 
     const calculateRanksAndTies = useCallback((scoresToProcess: Score[]): Score[] => {
         // Create a deep copy to avoid mutating the original state scores directly
@@ -314,12 +315,12 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
     };
 
     const getScoreColor = (score: Score): string => {
-        if (!score.status) return '';
+        if (!score.status) return 'rgba(0, 0, 0, 0.1)';
         switch (score.status) {
-            case 'YES': return 'rgba(76, 175, 80, 0.1)';
-            case 'ALT': return 'rgba(255, 152, 0, 0.1)';
-            case 'NO': return 'rgba(244, 67, 54, 0.1)';
-            default: return '';
+            case 'YES': return 'rgba(76, 175, 80, 0.7)'; // Green for YES
+            case 'ALT': return 'rgba(255, 152, 0, 0.7)'; // Orange for ALT
+            case 'NO': return 'rgba(244, 67, 54, 0.7)';  // Red for NO
+            default: return 'rgba(0, 0, 0, 0.1)';
         }
     };
 
@@ -411,49 +412,56 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
         });
     }, [state.scores, judge.roles, judge.isChiefJudge]);
 
-    const handleTouchStart = (e: React.TouchEvent, competitorId: string, currentScore: number | null) => {
+    const handleTouchStart = (e: React.TouchEvent, competitorId: string) => {
         const touch = e.touches[0];
-        const scoreCell = e.currentTarget as HTMLElement;
-        const rect = scoreCell.getBoundingClientRect();
+        const target = e.currentTarget as HTMLElement;
+        const rect = target.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const score = Math.round((x / rect.width) * 100);
         
-        // Store the initial touch position and cell dimensions
-        setTouchStart({
-            x: touch.clientX,
-            y: touch.clientY
-        });
-        
-        // Only set initial score if there isn't one already
-        if (currentScore === null) {
-            const touchX = touch.clientX - rect.left;
-            const scorePercent = Math.max(0, Math.min(100, (touchX / rect.width) * 100));
-            const initialScore = Math.round(scorePercent);
-            handleScoreChange(competitorId, initialScore);
-        }
-        
-        setTouchScore(currentScore ?? 0);
-        setIsAdjusting(true);
+        setTouchStart({ x: touch.clientX, y: touch.clientY });
+        setTouchScore(score);
+        setActiveRow(competitorId);
+        setIsScoring(false);
+        handleScoreChange(competitorId, score);
     };
 
     const handleTouchMove = (e: React.TouchEvent, competitorId: string) => {
-        if (!isAdjusting) return;
-
+        if (!touchStart) return;
+        
         const touch = e.touches[0];
-        const scoreCell = e.currentTarget as HTMLElement;
-        const rect = scoreCell.getBoundingClientRect();
+        const deltaX = touch.clientX - touchStart.x;
+        const deltaY = touch.clientY - touchStart.y;
         
-        // Calculate score based on current touch position
-        const touchX = Math.max(rect.left, Math.min(rect.right, touch.clientX));
-        const scorePercent = ((touchX - rect.left) / rect.width) * 100;
-        const newScore = Math.max(0, Math.min(100, Math.round(scorePercent)));
+        // If we haven't determined the direction yet and the movement is significant
+        if (!isScoring && Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+            // If the movement is more horizontal than vertical (with a 30-degree leeway)
+            if (Math.abs(deltaX) > Math.abs(deltaY) * 0.577) { // tan(30°) ≈ 0.577
+                setIsScoring(true);
+                e.preventDefault(); // Prevent scrolling when scoring
+            } else {
+                // If it's more vertical, let the scroll happen naturally
+                return;
+            }
+        }
         
-        handleScoreChange(competitorId, newScore);
-        setTouchScore(newScore);
+        // Only proceed with scoring if we've determined it's a horizontal movement
+        if (isScoring) {
+            const target = e.currentTarget as HTMLElement;
+            const rect = target.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const score = Math.max(0, Math.min(100, Math.round((x / rect.width) * 100)));
+            
+            setTouchScore(score);
+            handleScoreChange(competitorId, score);
+        }
     };
 
     const handleTouchEnd = () => {
         setTouchStart(null);
         setTouchScore(null);
-        setIsAdjusting(false);
+        setActiveRow(null);
+        setIsScoring(false);
     };
 
     const handleScoreAdjust = (competitorId: string, currentScore: number | null, delta: number) => {
@@ -498,273 +506,81 @@ const JudgingSheet: React.FC<JudgingSheetProps> = ({ competition, judge, onSubmi
 
     // Modify the display logic based on whether it's a chief judge
     const renderCompetitorList = () => {
-        const competitorsByHeat = organizeCompetitorsByHeat();
-        
-        if (judge.isChiefJudge || judge.roles.length > 1) {
-            // Combined view for chief judge or judges that can judge both roles
-            return (
-                <Box>
-                    {Object.entries(competitorsByHeat).map(([heatNumber, heatData]) => (
-                        <Paper key={heatNumber} sx={{ mb: 3, p: 2 }}>
-                            <Typography variant="h6" gutterBottom sx={{ borderBottom: 1, borderColor: 'divider', pb: 1 }}>
-                                Heat {heatNumber}
-                            </Typography>
-                            
-                            {/* Leaders Section */}
-                            <Box sx={{ mb: 2 }}>
-                                <Typography variant="subtitle1" color="primary" gutterBottom>
-                                    Leaders
-                                </Typography>
-                                <TableContainer>
-                                    <Table size="small">
-                                        <TableBody>
-                                            {heatData.Leader.map((competitor: Competitor) => {
-                                                const score = state.scores.find(s => s.competitorId === competitor.id) || 
-                                                            createEmptyScore(competitor.id, competitor.bibNumber);
-                                                return (
-                                                    <TableRow 
-                                                        key={competitor.id}
-                                                        sx={{
-                                                            backgroundColor: score.hasTie ? 'warning.light' : 'inherit'
-                                                        }}
-                                                    >
-                                                        <TableCell sx={{ width: '20%' }}>
-                                                            <Typography>#{competitor.bibNumber}</Typography>
-                                                            <Typography variant="caption" color="text.secondary">
-                                                                {competitor.name}
-                                                            </Typography>
-                                                        </TableCell>
-                                                        <TableCell sx={{ width: '60%' }}>
-                                                            <Grid container spacing={2} alignItems="center">
-                                                                <Grid item xs={12}>
-                                                                    {renderScoreInput(score, competitor.id)}
-                                                                </Grid>
-                                                            </Grid>
-                                                        </TableCell>
-                                                        <TableCell sx={{ width: '20%' }}>
-                                                            {renderScoreStatus(score)}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                );
-                                            })}
-                                        </TableBody>
-                                    </Table>
-                                </TableContainer>
-                            </Box>
-
-                            {/* Followers Section */}
-                            <Box>
-                                <Typography variant="subtitle1" color="primary" gutterBottom>
-                                    Followers
-                                </Typography>
-                                <TableContainer>
-                                    <Table size="small">
-                                        <TableBody>
-                                            {heatData.Follower.map((competitor: Competitor) => {
-                                                const score = state.scores.find(s => s.competitorId === competitor.id) || 
-                                                            createEmptyScore(competitor.id, competitor.bibNumber);
-                                                return (
-                                                    <TableRow 
-                                                        key={competitor.id}
-                                                        sx={{
-                                                            backgroundColor: score.hasTie ? 'warning.light' : 'inherit'
-                                                        }}
-                                                    >
-                                                        <TableCell sx={{ width: '20%' }}>
-                                                            <Typography>#{competitor.bibNumber}</Typography>
-                                                            <Typography variant="caption" color="text.secondary">
-                                                                {competitor.name}
-                                                            </Typography>
-                                                        </TableCell>
-                                                        <TableCell sx={{ width: '60%' }}>
-                                                            <Grid container spacing={2} alignItems="center">
-                                                                <Grid item xs={12}>
-                                                                    {renderScoreInput(score, competitor.id)}
-                                                                </Grid>
-                                                            </Grid>
-                                                        </TableCell>
-                                                        <TableCell sx={{ width: '20%' }}>
-                                                            {renderScoreStatus(score)}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                );
-                                            })}
-                                        </TableBody>
-                                    </Table>
-                                </TableContainer>
-                            </Box>
-                        </Paper>
-                    ))}
-                </Box>
-            );
-        } else {
-            // Single role view for regular judges
-            return (
-                <Box>
-                    {Object.entries(competitorsByHeat).map(([heatNumber, heatData]) => (
-                        <Paper key={heatNumber} sx={{ mb: 3, p: 2 }}>
-                            <Typography variant="h6" gutterBottom sx={{ borderBottom: 1, borderColor: 'divider', pb: 1 }}>
-                                Heat {heatNumber}
-                            </Typography>
-                            <TableContainer>
-                                <Table size="small">
-                                    <TableBody>
-                                        {heatData[state.currentRole].map((competitor: Competitor) => {
-                                            const score = state.scores.find(s => s.competitorId === competitor.id) || 
-                                                        createEmptyScore(competitor.id, competitor.bibNumber);
-                                            return (
-                                                <TableRow 
-                                                    key={competitor.id}
-                                                    sx={{
-                                                        backgroundColor: score.hasTie ? 'warning.light' : 'inherit'
-                                                    }}
-                                                >
-                                                    <TableCell sx={{ width: '20%' }}>
-                                                        <Typography>#{competitor.bibNumber}</Typography>
-                                                        <Typography variant="caption" color="text.secondary">
-                                                            {competitor.name}
-                                                        </Typography>
-                                                    </TableCell>
-                                                    <TableCell sx={{ width: '60%' }}>
-                                                        <Grid container spacing={2} alignItems="center">
-                                                            <Grid item xs={12}>
-                                                                {renderScoreInput(score, competitor.id)}
-                                                            </Grid>
-                                                        </Grid>
-                                                    </TableCell>
-                                                    <TableCell sx={{ width: '20%' }}>
-                                                        {renderScoreStatus(score)}
-                                                    </TableCell>
-                                                </TableRow>
-                                            );
-                                        })}
-                                    </TableBody>
-                                </Table>
-                            </TableContainer>
-                        </Paper>
-                    ))}
-                </Box>
-            );
-        }
-    };
-
-    // Helper function to render score input (reuse your existing score input logic)
-    const renderScoreInput = (score: Score, competitorId: string) => {
-        if (score.rawScore === null) {
-            return (
-                <Box 
-                    sx={{ 
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        height: '60px',
-                        bgcolor: 'action.hover',
-                        borderRadius: 1,
-                        cursor: 'pointer',
-                        touchAction: 'pan-y'
-                    }}
-                    onTouchStart={(e) => handleTouchStart(e, competitorId, null)}
-                    onTouchMove={(e) => handleTouchMove(e, competitorId)}
-                    onTouchEnd={handleTouchEnd}
-                >
-                    <Typography color="text.secondary">
-                        Slide to start scoring
-                    </Typography>
-                </Box>
-            );
-        }
+        const competitors = competition.competitors[state.currentRole] || [];
+        const scores = state.scores;
 
         return (
-            <Box
-                sx={{ 
-                    position: 'relative',
-                    cursor: 'pointer',
-                    touchAction: 'pan-y'
-                }}
-                onTouchStart={(e) => handleTouchStart(e, competitorId, score.rawScore)}
-                onTouchMove={(e) => handleTouchMove(e, competitorId)}
-                onTouchEnd={handleTouchEnd}
-            >
-                <Grid container spacing={1} alignItems="center">
-                    <Grid item>
-                        <IconButton
-                            size="small"
-                            onClick={() => handleScoreChange(competitorId, Math.max(0, (score.rawScore || 0) - 1))}
-                        >
-                            <RemoveIcon />
-                        </IconButton>
-                    </Grid>
-                    <Grid item xs>
-                        <TextField
-                            fullWidth
-                            value={score.rawScore || ''}
-                            onChange={(e) => handleDirectInput(competitorId, e.target.value)}
-                            variant="outlined"
-                            size="small"
-                            type="number"
-                            InputProps={{
-                                inputProps: { min: 0, max: 100 }
-                            }}
-                        />
-                        <Box 
-                            sx={{ 
-                                mt: 1,
-                                height: 4,
-                                width: '100%',
-                                bgcolor: 'grey.300',
-                                borderRadius: 1,
-                                overflow: 'hidden'
-                            }}
-                        >
-                            <Box
-                                sx={{
-                                    width: `${score.rawScore || 0}%`,
-                                    height: '100%',
-                                    bgcolor: 'primary.main',
-                                    transition: 'width 0.3s ease'
-                                }}
-                            />
-                        </Box>
-                    </Grid>
-                    <Grid item>
-                        <IconButton
-                            size="small"
-                            onClick={() => handleScoreChange(competitorId, Math.min(100, (score.rawScore || 0) + 1))}
-                        >
-                            <AddIcon />
-                        </IconButton>
-                    </Grid>
-                </Grid>
-            </Box>
+            <TableContainer component={Paper}>
+                <Table>
+                    <TableHead>
+                        <TableRow>
+                            <TableCell>Bib #</TableCell>
+                            <TableCell>Name</TableCell>
+                            <TableCell>Score</TableCell>
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {competitors.map((competitor) => {
+                            const score = scores.find(s => s.competitorId === competitor.id) || 
+                                        createEmptyScore(competitor.id, competitor.bibNumber);
+                            
+                            return (
+                                <TableRow key={competitor.id}>
+                                    <TableCell>{competitor.bibNumber}</TableCell>
+                                    <TableCell>{competitor.name}</TableCell>
+                                    <TableCell sx={{ p: 0 }}>
+                                        {renderScoreInput(score, competitor.id)}
+                                    </TableCell>
+                                </TableRow>
+                            );
+                        })}
+                    </TableBody>
+                </Table>
+            </TableContainer>
         );
     };
 
-    // Helper function to render score status (reuse your existing status display logic)
-    const renderScoreStatus = (score: Score) => {
-        if (score.rawScore === null) return null;
-
+    const renderScoreInput = (score: Score, competitorId: string) => {
         return (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                {judge.isChiefJudge ? (
-                    <Typography>Rank: {score.rank || '-'}</Typography>
-                ) : (
-                    <>
-                        {(score.rank || Infinity) <= competition.requiredYesCount && (
-                            <Chip size="small" label="YES" color="success" />
-                        )}
-                        {(score.rank || Infinity) > competition.requiredYesCount && 
-                         (score.rank || Infinity) <= (competition.requiredYesCount + competition.alternateCount) && (
-                            <Chip 
-                                size="small" 
-                                label={`ALT${(score.rank || 0) - competition.requiredYesCount}`} 
-                                color="info" 
-                            />
-                        )}
-                        {(score.rank || Infinity) > (competition.requiredYesCount + competition.alternateCount) && (
-                            <Chip size="small" label="NO" color="error" />
-                        )}
-                    </>
-                )}
+            <Box
+                sx={{
+                    position: 'relative',
+                    width: '100%',
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    backgroundColor: activeRow === competitorId ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+                    cursor: 'pointer',
+                    touchAction: 'pan-y',
+                }}
+                onTouchStart={(e) => handleTouchStart(e, competitorId)}
+                onTouchMove={(e) => handleTouchMove(e, competitorId)}
+                onTouchEnd={handleTouchEnd}
+            >
+                <Box
+                    sx={{
+                        position: 'absolute',
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: `${score.rawScore || 0}%`,
+                        backgroundColor: getScoreColor(score),
+                        opacity: 0.7,
+                        transition: isScoring ? 'none' : 'width 0.2s ease',
+                    }}
+                />
+                <Typography
+                    sx={{
+                        position: 'absolute',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        zIndex: 1,
+                        fontWeight: 'bold',
+                        color: score.status === 'NO' ? 'white' : 'inherit',
+                    }}
+                >
+                    {score.rawScore !== null ? score.rawScore : '-'}
+                </Typography>
             </Box>
         );
     };
